@@ -8,6 +8,8 @@ import type {
   StartRunInput,
 } from "../shared/domain";
 import { graphDefinitionSchema } from "../shared/domain";
+import type { WorkspaceLayoutRecord } from "../shared/workspace";
+import { validateWorkspaceLayoutRecord } from "../shared/workspace";
 import type { SpireDatabase } from "./database";
 import type { AgentHarness } from "./opencode";
 import type { RunEngine } from "./run-engine";
@@ -111,6 +113,24 @@ export class AppService {
 
   getRun(runId: string) {
     return this.database.getRun(runId);
+  }
+
+  listWorkspaceLayouts(graphId: string): WorkspaceLayoutRecord[] {
+    if (!graphId) throw new Error("A graph id is required.");
+    return this.database.listWorkspaceLayouts(graphId);
+  }
+
+  saveWorkspaceLayout(input: unknown): void {
+    const validation = validateWorkspaceLayoutRecord(input);
+    if (!validation.ok) {
+      throw new Error(`Workspace layout rejected: ${validation.reason}`);
+    }
+    this.database.saveWorkspaceLayout(validation.record);
+  }
+
+  resetWorkspaceLayouts(graphId: string): void {
+    if (!graphId) throw new Error("A graph id is required.");
+    this.database.resetWorkspaceLayouts(graphId);
   }
 
   private defaultGraph(model: string): GraphDefinition {

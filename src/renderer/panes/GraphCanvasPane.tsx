@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -7,17 +7,40 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
   type Edge,
   type NodeChange,
   applyNodeChanges,
 } from "@xyflow/react";
 import type { AgentNode as DomainAgentNode } from "../../shared/domain";
 import { useAppStore } from "../store";
-import { AgentNode, type AgentFlowNode } from "./AgentNode";
+import { AgentNode, type AgentFlowNode } from "../components/AgentNode";
 
 const nodeTypes = { agent: AgentNode };
 
-export function GraphCanvas() {
+const ACCENT = "#6ea8fe";
+const ACCENT_TEXT = "#a8caff";
+const EDGE_IDLE = "#4a5160";
+const LABEL_IDLE = "#7b8496";
+
+export function GraphCanvasPane() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  return (
+    <div className="graph-canvas" ref={containerRef} data-pane="graph-canvas">
+      <ReactFlowProvider>
+        <CanvasView containerRef={containerRef} />
+      </ReactFlowProvider>
+      <div className="canvas-coordinate">LOCAL / WORKTREE ISOLATED</div>
+    </div>
+  );
+}
+
+function CanvasView({
+  containerRef,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}) {
   const graph = useAppStore((state) => state.graph)!;
   const snapshot = useAppStore((state) => state.snapshot)!;
   const selectedRunId = useAppStore((state) => state.selectedRunId);
@@ -25,6 +48,26 @@ export function GraphCanvas() {
   const updateGraph = useAppStore((state) => state.updateGraph);
   const selectNode = useAppStore((state) => state.selectNode);
   const run = snapshot.runs.find((item) => item.id === selectedRunId);
+  const { fitView } = useReactFlow();
+
+  // Refit whenever the pane is resized, redocked, or popped out so the
+  // graph stays framed inside its new bounds.
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        void fitView({ padding: 0.2, duration: 120 });
+      });
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [containerRef, fitView]);
 
   const nodes = useMemo<AgentFlowNode[]>(
     () =>
@@ -134,20 +177,20 @@ export function GraphCanvas() {
             type: MarkerType.ArrowClosed,
             width: 16,
             height: 16,
-            color: active ? "#8b7cf6" : "#465168",
+            color: active ? ACCENT : EDGE_IDLE,
           },
           style: {
-            stroke: active ? "#8b7cf6" : "#465168",
+            stroke: active ? ACCENT : EDGE_IDLE,
             strokeWidth: active ? 2 : 1.25,
           },
           labelStyle: {
-            fill: active ? "#c6befd" : "#758197",
+            fill: active ? ACCENT_TEXT : LABEL_IDLE,
             fontSize: 10,
             fontWeight: 600,
             letterSpacing: "0.08em",
             textTransform: "uppercase",
           },
-          labelBgStyle: { fill: "#0d1320", fillOpacity: 0.92 },
+          labelBgStyle: { fill: "#101216", fillOpacity: 0.92 },
           labelBgPadding: [7, 4] as [number, number],
           labelBgBorderRadius: 5,
         };
@@ -173,39 +216,34 @@ export function GraphCanvas() {
   );
 
   return (
-    <div className="graph-canvas">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
-        onNodeClick={(_event, node) => selectNode(node.id)}
-        onPaneClick={() => selectNode(undefined)}
-        fitView
-        minZoom={0.55}
-        maxZoom={1.6}
-        deleteKeyCode={null}
-        proOptions={{ hideAttribution: true }}
-        aria-label="Agent graph editor"
-      >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={22}
-          size={1}
-          color="#273147"
-        />
-        <Controls showInteractive={false} position="bottom-left" />
-        <MiniMap
-          pannable
-          zoomable
-          position="bottom-right"
-          nodeColor={(node) =>
-            node.id === "planner" ? "#7467db" : "#29a878"
-          }
-          maskColor="rgba(7, 10, 17, 0.75)"
-        />
-      </ReactFlow>
-      <div className="canvas-coordinate">LOCAL / WORKTREE ISOLATED</div>
-    </div>
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={nodeTypes}
+      onNodesChange={onNodesChange}
+      onNodeClick={(_event, node) => selectNode(node.id)}
+      onPaneClick={() => selectNode(undefined)}
+      fitView
+      minZoom={0.55}
+      maxZoom={1.6}
+      deleteKeyCode={null}
+      proOptions={{ hideAttribution: true }}
+      aria-label="Agent graph editor"
+    >
+      <Background
+        variant={BackgroundVariant.Dots}
+        gap={22}
+        size={1}
+        color="#23262d"
+      />
+      <Controls showInteractive={false} position="bottom-left" />
+      <MiniMap
+        pannable
+        zoomable
+        position="bottom-right"
+        nodeColor={(node) => (node.id === "planner" ? "#5b8def" : "#2fbf8f")}
+        maskColor="rgba(10, 11, 14, 0.78)"
+      />
+    </ReactFlow>
   );
 }

@@ -1,7 +1,7 @@
 import { FolderGit2, LoaderCircle, Play, Sparkles } from "lucide-react";
 import { useAppStore } from "../store";
 
-export function RunComposer() {
+export function TaskLauncherPane() {
   const graph = useAppStore((state) => state.graph)!;
   const snapshot = useAppStore((state) => state.snapshot)!;
   const repositoryPath = useAppStore((state) => state.repositoryPath);
@@ -39,7 +39,7 @@ export function RunComposer() {
   }
 
   return (
-    <section className="run-composer">
+    <div className="pane task-launcher" data-pane="task-launcher">
       <button
         className="repo-picker"
         onClick={() => void chooseRepository()}
@@ -64,7 +64,7 @@ export function RunComposer() {
         <span>⌘↵</span>
       </div>
       <button
-        className="primary-button run-button"
+        className="primary-button run-button liquid-border"
         disabled={busy || active || !goal.trim() || !repositoryPath}
         onClick={() => void start()}
       >
@@ -75,6 +75,6 @@ export function RunComposer() {
         )}
         {active ? "Run active" : "Launch graph"}
       </button>
-    </section>
+    </div>
   );
 }

@@ -5,11 +5,15 @@ import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
+// E2E builds set SPIRE_ALLOW_INSPECT=1 so Playwright can drive the app
+// through the Node inspector; production builds keep inspect arguments
+// disabled by fuse.
+const allowInspection = process.env.SPIRE_ALLOW_INSPECT === "1";
+
 const config = {
   packagerConfig: {
     asar: true,
-    executableName: "spire",
-    ignore: (file: string) => {
+    executableName: "spire",    ignore: (file: string) => {
       if (!file) return false;
       const runtimePaths = [
         "/.vite",
@@ -64,7 +68,7 @@ const config = {
       [FuseV1Options.RunAsNode]: false,
       [FuseV1Options.EnableCookieEncryption]: true,
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
-      [FuseV1Options.EnableNodeCliInspectArguments]: false,
+      [FuseV1Options.EnableNodeCliInspectArguments]: allowInspection,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),

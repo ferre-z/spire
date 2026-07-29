@@ -1,8 +1,19 @@
 import Database from "better-sqlite3";
 import type { GraphDefinition, RunRecord } from "../shared/domain";
+import type {
+  WorkspaceLayoutMode,
+  WorkspaceLayoutRecord,
+} from "../shared/workspace";
 
 type SettingRow = { value: string };
 type JsonRow = { json: string };
+type WorkspaceLayoutRow = {
+  graph_id: string;
+  mode: string;
+  schema_version: number;
+  model: string;
+  updated_at: string;
+};
 
 export class SpireDatabase {
   private readonly db: Database.Database;
@@ -26,6 +37,14 @@ export class SpireDatabase {
         id TEXT PRIMARY KEY,
         updated_at TEXT NOT NULL,
         json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS workspace_layouts (
+        graph_id TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (graph_id, mode)
       );
     `);
   }
@@ -87,6 +106,48 @@ export class SpireDatabase {
            json = excluded.json`,
       )
       .run(run.id, new Date().toISOString(), JSON.stringify(run));
+  }
+
+  listWorkspaceLayouts(graphId: string): WorkspaceLayoutRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT graph_id, mode, schema_version, model, updated_at
+         FROM workspace_layouts WHERE graph_id = ?`,
+      )
+      .all(graphId) as WorkspaceLayoutRow[];
+    return rows.map((row) => ({
+      graphId: row.graph_id,
+      mode: row.mode as WorkspaceLayoutMode,
+      schemaVersion: row.schema_version,
+      model: JSON.parse(row.model) as WorkspaceLayoutRecord["model"],
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  saveWorkspaceLayout(record: WorkspaceLayoutRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO workspace_layouts
+           (graph_id, mode, schema_version, model, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(graph_id, mode) DO UPDATE SET
+           schema_version = excluded.schema_version,
+           model = excluded.model,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.graphId,
+        record.mode,
+        record.schemaVersion,
+        JSON.stringify(record.model),
+        record.updatedAt,
+      );
+  }
+
+  resetWorkspaceLayouts(graphId: string): void {
+    this.db
+      .prepare("DELETE FROM workspace_layouts WHERE graph_id = ?")
+      .run(graphId);
   }
 
   close(): void {

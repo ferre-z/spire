@@ -22,5 +22,5 @@
       "@renderer/*": ["src/renderer/*"]
     }
   },
-  "include": ["src", "*.ts"]
+  "include": ["src", "e2e", "*.ts"]
 }

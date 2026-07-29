@@ -16,7 +16,11 @@ report, final verdict, and workspace reference in a local SQLite database.
 
 ## MVP capabilities
 
-- Cinematic dark graph editor built with React Flow.
+- Professional dockable workspace built with FlexLayout: ten closable,
+  resizable, tab-groupable, maximizable panes with native popout windows.
+- Per-graph persisted layouts with separate desktop and compact arrangements
+  (breakpoint at 1100px), a View menu, and a Ctrl/Cmd+K layout command menu.
+- Dark graph editor built with React Flow.
 - Editable agent names, instructions, models, positions, and loop cap.
 - In-app OpenRouter connection and model discovery through OpenCode.
 - Real OpenCode sessions through its typed SDK and headless local server.
@@ -26,7 +30,8 @@ report, final verdict, and workspace reference in a local SQLite database.
 - Isolated Git worktrees with actual tracked and untracked diffs.
 - Persistent run history, live events, patch export, and worktree reveal.
 - Secure Electron preload: context isolation, renderer sandbox, no Node
-  integration, localhost-only OpenCode server with an in-memory password.
+  integration, an exact popout window allowlist, and localhost-only OpenCode
+  server with an in-memory password.
 
 Self-modifying graphs, arbitrary graph topology, multiple simultaneous runs,
 remote hosts, containers/pods, and other harnesses are intentionally deferred.
@@ -68,12 +73,15 @@ stored in Spire's database or run events.
 ```bash
 pnpm typecheck
 pnpm test
+pnpm test:e2e
 pnpm lint
 pnpm build
 pnpm make
 ```
 
 - `pnpm build` creates an unpacked Linux application under `out/`.
+- `pnpm test:e2e` packages the app and runs the Playwright Electron UI suite
+  under Xvfb against seeded, offline fixtures.
 - `pnpm make` produces Linux ZIP and `.deb` distributables.
 
 Creating the distributables also requires the host-level `zip`, `dpkg`, and
@@ -126,6 +134,14 @@ The automated suite covers:
 - Successful two-pass review/revision execution.
 - Iteration-cap termination.
 - Real temporary Git worktree creation, diff inspection, and cleanup.
+- Workspace layout validation, corrupt-layout fallback, and the 512KB cap.
+- Default desktop/compact models and panel registry completeness.
+- Layout persistence per graph, per mode, and across graph versions.
+- The popout window allowlist (everything else stays denied).
+- Playwright Electron UI tests at 800×600 through 1920×1080: docking,
+  tab grouping, maximize, reset, graph switching, keyboard navigation,
+  native popouts, security denials, contrast, reduced motion, overflow,
+  and screenshot comparisons — all with mocked run data, never OpenRouter.
 
 The real provider contract is intentionally not part of the default test suite
 because it requires a paid model credential.

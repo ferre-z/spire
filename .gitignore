@@ -2,6 +2,7 @@ node_modules/
 .vite/
 out/
 coverage/
+test-results/
 .pnpm-store/
 *.sqlite
 *.sqlite-shm

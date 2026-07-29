@@ -1,11 +1,14 @@
 import { app, BrowserWindow, nativeTheme } from "electron";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { AppService } from "./app-service";
 import { SpireDatabase } from "./database";
 import { registerIpc, sendRunEvent } from "./ipc";
 import { OpenCodeHarness } from "./opencode";
 import { RunEngine } from "./run-engine";
+import { isAllowedPopoutUrl } from "./window-policy";
 import { LocalWorktreeBackend } from "./worktree";
+import type { GraphDefinition, RunRecord } from "../shared/domain";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -14,17 +17,41 @@ let mainWindow: BrowserWindow | null = null;
 let database: SpireDatabase | undefined;
 let harness: OpenCodeHarness | undefined;
 
+type SeedFixture = {
+  settings?: Record<string, string>;
+  graphs?: GraphDefinition[];
+  runs?: RunRecord[];
+};
+
+function seedFromFixture(database: SpireDatabase, fixturePath: string): void {
+  try {
+    const fixture = JSON.parse(
+      readFileSync(fixturePath, "utf8"),
+    ) as SeedFixture;
+    for (const [key, value] of Object.entries(fixture.settings ?? {})) {
+      database.setSetting(key, value);
+    }
+    for (const graph of fixture.graphs ?? []) database.saveGraph(graph);
+    for (const run of fixture.runs ?? []) database.saveRun(run);
+  } catch (error) {
+    console.error("Failed to apply SPIRE_SEED fixture:", error);
+  }
+}
+
+const POPOUT_MIN_WIDTH = 360;
+const POPOUT_MIN_HEIGHT = 260;
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1500,
     height: 940,
-    minWidth: 1080,
-    minHeight: 700,
-    backgroundColor: "#090d16",
+    minWidth: 800,
+    minHeight: 600,
+    backgroundColor: "#0a0b0e",
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      color: "#090d16",
-      symbolColor: "#9aa7bd",
+      color: "#0a0b0e",
+      symbolColor: "#8b93a3",
       height: 42,
     },
     webPreferences: {
@@ -35,8 +62,36 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (
+      isAllowedPopoutUrl(
+        url,
+        MAIN_WINDOW_VITE_DEV_SERVER_URL,
+        MAIN_WINDOW_VITE_NAME,
+      )
+    ) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          minWidth: POPOUT_MIN_WIDTH,
+          minHeight: POPOUT_MIN_HEIGHT,
+          autoHideMenuBar: true,
+          backgroundColor: "#0a0b0e",
+        },
+      };
+    }
+    return { action: "deny" };
+  });
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
+
+  // Popout windows are extensions of the workspace: close them when the
+  // main window goes away so none outlive the application shell.
+  mainWindow.on("closed", () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.close();
+    }
+    mainWindow = null;
+  });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
@@ -52,8 +107,15 @@ function createWindow(): void {
 
 void app.whenReady().then(() => {
   nativeTheme.themeSource = "dark";
-  const dataRoot = app.getPath("userData");
+  // SPIRE_USER_DATA lets E2E tests run against an isolated, pre-seeded
+  // database instead of the real user profile.
+  const dataRoot = process.env.SPIRE_USER_DATA ?? app.getPath("userData");
   database = new SpireDatabase(path.join(dataRoot, "spire.sqlite"));
+  // E2E-only fixture seeding: SPIRE_SEED points at a JSON file with
+  // settings/graphs/runs so UI tests never touch OpenRouter.
+  if (process.env.SPIRE_SEED) {
+    seedFromFixture(database, process.env.SPIRE_SEED);
+  }
   harness = new OpenCodeHarness();
   const backend = new LocalWorktreeBackend(path.join(dataRoot, "worktrees"));
   const engine = new RunEngine(

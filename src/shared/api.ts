@@ -5,6 +5,10 @@ import type {
   RunEvent,
   StartRunInput,
 } from "./domain";
+import type {
+  WorkspaceEnvironment,
+  WorkspaceLayoutRecord,
+} from "./workspace";
 
 export type Unsubscribe = () => void;
 
@@ -21,6 +25,10 @@ export interface SpireApi {
   revealPath(path: string): Promise<void>;
   exportPatch(runId: string): Promise<string | null>;
   cleanupWorktree(runId: string): Promise<AppSnapshot>;
+  loadWorkspaceLayouts(graphId: string): Promise<WorkspaceLayoutRecord[]>;
+  saveWorkspaceLayout(record: WorkspaceLayoutRecord): Promise<void>;
+  resetWorkspaceLayouts(graphId: string): Promise<void>;
+  environment(): Promise<WorkspaceEnvironment>;
   onRunEvent(listener: (event: RunEvent) => void): Unsubscribe;
 }
 
@@ -37,5 +45,9 @@ export const IPC = {
   revealPath: "spire:reveal-path",
   exportPatch: "spire:export-patch",
   cleanupWorktree: "spire:cleanup-worktree",
+  loadWorkspaceLayouts: "spire:load-workspace-layouts",
+  saveWorkspaceLayout: "spire:save-workspace-layout",
+  resetWorkspaceLayouts: "spire:reset-workspace-layouts",
+  environment: "spire:environment",
   runEvent: "spire:run-event",
 } as const;

@@ -8,7 +8,19 @@ import type {
   RunEvent,
   StartRunInput,
 } from "../shared/domain";
+import type { WorkspaceEnvironment } from "../shared/workspace";
 import type { AppService } from "./app-service";
+
+export function detectEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+): WorkspaceEnvironment {
+  return {
+    platform,
+    isWayland:
+      env.XDG_SESSION_TYPE === "wayland" || Boolean(env.WAYLAND_DISPLAY),
+  };
+}
 
 export function registerIpc(
   service: AppService,
@@ -73,6 +85,16 @@ export function registerIpc(
   ipcMain.handle(IPC.cleanupWorktree, (_event, runId: string) =>
     service.cleanupWorktree(runId),
   );
+  ipcMain.handle(IPC.loadWorkspaceLayouts, (_event, graphId: string) =>
+    service.listWorkspaceLayouts(graphId),
+  );
+  ipcMain.handle(IPC.saveWorkspaceLayout, (_event, record: unknown) => {
+    service.saveWorkspaceLayout(record);
+  });
+  ipcMain.handle(IPC.resetWorkspaceLayouts, (_event, graphId: string) => {
+    service.resetWorkspaceLayouts(graphId);
+  });
+  ipcMain.handle(IPC.environment, () => detectEnvironment());
 }
 
 export function sendRunEvent(

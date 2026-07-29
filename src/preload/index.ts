@@ -6,6 +6,7 @@ import type {
   RunEvent,
   StartRunInput,
 } from "../shared/domain";
+import type { WorkspaceLayoutRecord } from "../shared/workspace";
 
 const api: SpireApi = {
   snapshot: () => ipcRenderer.invoke(IPC.snapshot),
@@ -25,6 +26,13 @@ const api: SpireApi = {
     ipcRenderer.invoke(IPC.exportPatch, runId),
   cleanupWorktree: (runId: string) =>
     ipcRenderer.invoke(IPC.cleanupWorktree, runId),
+  loadWorkspaceLayouts: (graphId: string) =>
+    ipcRenderer.invoke(IPC.loadWorkspaceLayouts, graphId),
+  saveWorkspaceLayout: (record: WorkspaceLayoutRecord) =>
+    ipcRenderer.invoke(IPC.saveWorkspaceLayout, record),
+  resetWorkspaceLayouts: (graphId: string) =>
+    ipcRenderer.invoke(IPC.resetWorkspaceLayouts, graphId),
+  environment: () => ipcRenderer.invoke(IPC.environment),
   onRunEvent: (listener: (event: RunEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, event: RunEvent) =>
       listener(event);

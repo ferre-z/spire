@@ -112,7 +112,7 @@ export function Onboarding() {
           run history or its database.
         </p>
         <button
-          className="primary-button ignition-button"
+          className="primary-button ignition-button liquid-border"
           disabled={!status?.compatible || !apiKey.trim() || connecting}
           onClick={() => void connect()}
         >

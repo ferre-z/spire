@@ -15,7 +15,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const finished = runStatus === "succeeded";
   return (
     <div
-      className={`agent-node agent-${agent.role} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}`}
+      className={`agent-node liquid-border agent-${agent.role} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}`}
     >
       <Handle
         id="left-target"
