@@ -13,7 +13,11 @@ const allowInspection = process.env.SPIRE_ALLOW_INSPECT === "1";
 const config = {
   packagerConfig: {
     asar: true,
-    executableName: "spire",    ignore: (file: string) => {
+    executableName: "spire",
+    // Ship the self-contained MCP stdio sidecar next to the app so MCP
+    // clients can run it with any Node 22+ (`node resources/mcp.js`).
+    extraResource: [".vite/mcp/mcp.js"],
+    ignore: (file: string) => {
       if (!file) return false;
       const runtimePaths = [
         "/.vite",
@@ -30,6 +34,15 @@ const config = {
     },
   },
   rebuildConfig: {},
+  hooks: {
+    // The Vite plugin builds main/preload/renderer only; the MCP sidecar
+    // has its own config and must be compiled before extraResource copies
+    // it into the packaged app.
+    prePackage: async () => {
+      const { build } = await import("vite");
+      await build({ configFile: "vite.mcp.config.ts", logLevel: "error" });
+    },
+  },
   makers: [
     new MakerZIP({}, ["linux"]),
     new MakerDeb({
