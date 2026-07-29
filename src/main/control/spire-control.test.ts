@@ -3,10 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphDefinition, RunRecord } from "../../shared/domain";
-import {
-  CONTROL_CAPABILITIES,
-  CONTROL_OPERATION_NAMES,
-} from "../../shared/control";
+import { CONTROL_OPERATION_NAMES } from "../../shared/control";
 import type { TraceEvent } from "../../shared/trace";
 import { WORKSPACE_LAYOUT_SCHEMA_VERSION } from "../../shared/workspace";
 import type { WorkspaceLayoutRecord } from "../../shared/workspace";
@@ -199,14 +196,16 @@ describe("SpireControl registry", () => {
   it("exposes one capability per ControlOperationMap key", () => {
     const { control } = createControl();
     const listed = control.listCapabilities();
+    // ControlOperationMap has exactly 20 operations; the mapped type ties the
+    // dispatch registry to it at compile time, so assert runtime coverage of
+    // the registry itself — keys, count, and a bound handler per operation.
+    expect(CONTROL_OPERATION_NAMES).toHaveLength(20);
     expect(Object.keys(listed).sort()).toEqual(
       [...CONTROL_OPERATION_NAMES].sort(),
     );
-    // ControlOperationMap has exactly 20 operations; the mapped type ties
-    // CONTROL_CAPABILITIES to it at compile time, assert the runtime count.
-    expect(CONTROL_OPERATION_NAMES).toHaveLength(20);
-    expect(Object.keys(CONTROL_CAPABILITIES)).toHaveLength(20);
+    expect(Object.keys(listed)).toHaveLength(20);
     for (const name of CONTROL_OPERATION_NAMES) {
+      expect(typeof listed[name].handler).toBe("function");
       expect(listed[name].inputSchema).toBeDefined();
       expect(listed[name].outputSchema).toBeDefined();
       expect(typeof listed[name].readOnly).toBe("boolean");
@@ -340,6 +339,32 @@ describe("SpireControl.execute tracing", () => {
     const failures = journal.query({ kind: "control.failure" });
     expect(failures.events).toHaveLength(1);
     expect(failures.events[0].message).toContain("runs.get");
+  });
+
+  it("records a failure event with the shared correlation id when an async handler rejects", async () => {
+    const { control, journal } = createControl();
+    const repositoryPath = await makeRepository();
+    // handleRunsStart is async: the blank-goal error arrives as a rejection,
+    // not a synchronous throw, and must still be traced.
+    await expect(
+      control.execute("runs.start", {
+        graph: graph(),
+        repositoryPath,
+        goal: "   ",
+      }),
+    ).rejects.toThrow(/goal/i);
+
+    const failures = journal.query({ kind: "control.failure" });
+    expect(failures.events).toHaveLength(1);
+    expect(failures.events[0].level).toBe("error");
+    expect(failures.events[0].message).toContain("runs.start");
+    const correlated = journal.query({
+      correlationId: failures.events[0].correlationId,
+    });
+    expect(correlated.events.map((event) => event.kind)).toEqual([
+      "control.start",
+      "control.failure",
+    ]);
   });
 
   it("passes raw payloads to the journal, which is the only redactor", async () => {

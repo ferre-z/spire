@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import {
-  CONTROL_CAPABILITIES,
   type ControlContext,
   type ControlOperationMap,
   type ControlOperationName,
@@ -113,7 +112,8 @@ function toJsonValue(value: unknown): JsonValue {
   }
 }
 
-function parseCursor(cursor: string | undefined): number {  if (cursor === undefined) return 0;
+function parseCursor(cursor: string | undefined): number {
+  if (cursor === undefined) return 0;
   const offset = Number.parseInt(cursor, 10);
   if (!Number.isInteger(offset) || offset < 0 || String(offset) !== cursor) {
     throw new Error("Invalid cursor.");
@@ -208,24 +208,29 @@ export class SpireControl {
       throw recordFailure(error);
     }
 
-    return Promise.resolve(output).then((resolved) => {
-      let validated: ControlOperationMap[Name]["output"];
-      try {
-        validated = operation.outputSchema.parse(resolved);
-      } catch (error) {
+    return Promise.resolve(output).then(
+      (resolved) => {
+        let validated: ControlOperationMap[Name]["output"];
+        try {
+          validated = operation.outputSchema.parse(resolved);
+        } catch (error) {
+          throw recordFailure(error);
+        }
+        this.deps.journal.append({
+          correlationId,
+          runId: runId ?? outputRunId(validated),
+          kind: "control.success",
+          level: "info",
+          subsystem: TRACE_SUBSYSTEM,
+          message: `${name} succeeded`,
+          payload: { output: toJsonValue(validated) },
+        });
+        return validated;
+      },
+      (error) => {
         throw recordFailure(error);
-      }
-      this.deps.journal.append({
-        correlationId,
-        runId: runId ?? outputRunId(validated),
-        kind: "control.success",
-        level: "info",
-        subsystem: TRACE_SUBSYSTEM,
-        message: `${name} succeeded`,
-        payload: { output: toJsonValue(validated) },
-      });
-      return validated;
-    });
+      },
+    );
   }
 
   /** Subscribe to live trace events from the journal. */
@@ -233,9 +238,9 @@ export class SpireControl {
     return this.deps.journal.subscribe(listener);
   }
 
-  /** The capability registry shared with IPC and MCP adapters. */
-  listCapabilities(): typeof CONTROL_CAPABILITIES {
-    return CONTROL_CAPABILITIES;
+  /** The dispatch registry shared with IPC and MCP adapters. */
+  listCapabilities(): ControlRegistry {
+    return this.registry;
   }
 
   // --- Facade support (not control operations) ---------------------------
