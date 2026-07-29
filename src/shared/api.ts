@@ -5,6 +5,7 @@ import type {
   RunEvent,
   StartRunInput,
 } from "./domain";
+import type { TraceEvent } from "./trace";
 import type {
   WorkspaceEnvironment,
   WorkspaceLayoutRecord,
@@ -30,6 +31,7 @@ export interface SpireApi {
   resetWorkspaceLayouts(graphId: string): Promise<void>;
   environment(): Promise<WorkspaceEnvironment>;
   onRunEvent(listener: (event: RunEvent) => void): Unsubscribe;
+  onTraceEvent(listener: (event: TraceEvent) => void): Unsubscribe;
 }
 
 export const IPC = {
@@ -50,4 +52,5 @@ export const IPC = {
   resetWorkspaceLayouts: "spire:reset-workspace-layouts",
   environment: "spire:environment",
   runEvent: "spire:run-event",
+  traceEvent: "spire:trace-event",
 } as const;

@@ -85,10 +85,17 @@ export class AppService {
   saveWorkspaceLayout(input: unknown): void {
     // The IPC handler does not await this call; layouts.save is synchronous,
     // so execute() throws validation errors synchronously to the renderer.
-    void this.control.execute("layouts.save", input);
+    // Log async failures instead of leaving an unhandled rejection.
+    void this.control.execute("layouts.save", input).catch((error: unknown) => {
+      console.error("layouts.save failed:", error);
+    });
   }
 
   resetWorkspaceLayouts(graphId: string): void {
-    void this.control.execute("layouts.reset", { graphId });
+    void this.control
+      .execute("layouts.reset", { graphId })
+      .catch((error: unknown) => {
+        console.error("layouts.reset failed:", error);
+      });
   }
 }

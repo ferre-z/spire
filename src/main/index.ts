@@ -1,9 +1,9 @@
 import { app, BrowserWindow, nativeTheme } from "electron";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { AppService } from "./app-service";
+import { SpireControl } from "./control/spire-control";
 import { SpireDatabase } from "./database";
-import { registerIpc, sendRunEvent } from "./ipc";
+import { detectEnvironment, registerIpc, sendRunEvent } from "./ipc";
 import { OpenCodeHarness } from "./opencode";
 import { RunEngine } from "./run-engine";
 import { isAllowedPopoutUrl } from "./window-policy";
@@ -124,8 +124,15 @@ void app.whenReady().then(() => {
     backend,
     (event) => sendRunEvent(mainWindow, event),
   );
-  const service = new AppService(database, harness, engine, backend);
-  registerIpc(service, () => mainWindow);
+  const control = new SpireControl({
+    database,
+    engine,
+    harness,
+    backend,
+    journal: database.createTraceJournal(),
+    environment: { appVersion: app.getVersion(), ...detectEnvironment() },
+  });
+  registerIpc(control, () => mainWindow);
   createWindow();
 
   app.on("activate", () => {

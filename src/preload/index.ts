@@ -6,6 +6,7 @@ import type {
   RunEvent,
   StartRunInput,
 } from "../shared/domain";
+import type { TraceEvent } from "../shared/trace";
 import type { WorkspaceLayoutRecord } from "../shared/workspace";
 
 const api: SpireApi = {
@@ -38,6 +39,12 @@ const api: SpireApi = {
       listener(event);
     ipcRenderer.on(IPC.runEvent, handler);
     return () => ipcRenderer.removeListener(IPC.runEvent, handler);
+  },
+  onTraceEvent: (listener: (event: TraceEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: TraceEvent) =>
+      listener(event);
+    ipcRenderer.on(IPC.traceEvent, handler);
+    return () => ipcRenderer.removeListener(IPC.traceEvent, handler);
   },
 };
 

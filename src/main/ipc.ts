@@ -9,7 +9,7 @@ import type {
   StartRunInput,
 } from "../shared/domain";
 import type { WorkspaceEnvironment } from "../shared/workspace";
-import type { AppService } from "./app-service";
+import type { SpireControl } from "./control/spire-control";
 
 export function detectEnvironment(
   env: NodeJS.ProcessEnv = process.env,
@@ -22,15 +22,33 @@ export function detectEnvironment(
   };
 }
 
+/**
+ * Electron IPC adapter over the control plane.
+ *
+ * Every renderer operation dispatches exactly one registered control
+ * capability through `SpireControl.execute()` (input validation failures
+ * surface as IPC errors). The only exceptions are composed flows whose extra
+ * steps are Electron-only or facade concerns: repository selection (native
+ * open dialog, then `repositories.validate`), patch export
+ * (`runs.artifacts.get`, then a native save dialog), shell/environment
+ * operations that have no control capability, and onboarding
+ * (`control.connectOpenRouter`). Mutations that the renderer contract answers
+ * with an `AppSnapshot` compose it via `control.snapshot()` — the same body
+ * as `state.get` — so each handler still dispatches a single capability.
+ *
+ * Returns an unsubscribe for the trace forwarding subscription.
+ */
 export function registerIpc(
-  service: AppService,
+  control: SpireControl,
   getWindow: () => BrowserWindow | null,
-): void {
-  ipcMain.handle(IPC.snapshot, () => service.snapshot());
-  ipcMain.handle(IPC.detectOpenCode, () => service.detectOpenCode());
-  ipcMain.handle(
-    IPC.connectOpenRouter,
-    (_event, input: ProviderInput) => service.connectOpenRouter(input),
+): () => void {
+  ipcMain.handle(IPC.snapshot, () => control.execute("state.get"));
+  ipcMain.handle(IPC.detectOpenCode, async () => {
+    await control.execute("harnesses.list");
+    return control.snapshot();
+  });
+  ipcMain.handle(IPC.connectOpenRouter, (_event, input: ProviderInput) =>
+    control.connectOpenRouter(input),
   );
   ipcMain.handle(IPC.chooseRepository, async () => {
     const window = getWindow();
@@ -41,20 +59,28 @@ export function registerIpc(
     const result = window
       ? await dialog.showOpenDialog(window, options)
       : await dialog.showOpenDialog(options);
-    return result.canceled ? null : result.filePaths[0];
+    if (result.canceled) return null;
+    const validation = await control.execute("repositories.validate", {
+      path: result.filePaths[0],
+    });
+    return validation.ok ? validation.path : null;
   });
-  ipcMain.handle(IPC.saveGraph, (_event, graph: GraphDefinition) =>
-    service.saveGraph(graph),
-  );
-  ipcMain.handle(IPC.startRun, (_event, input: StartRunInput) =>
-    service.startRun(input),
-  );
-  ipcMain.handle(IPC.stopRun, (_event, runId: string) =>
-    service.stopRun(runId),
-  );
-  ipcMain.handle(IPC.retryRun, (_event, runId: string) =>
-    service.retryRun(runId),
-  );
+  ipcMain.handle(IPC.saveGraph, async (_event, graph: GraphDefinition) => {
+    await control.execute("graphs.save", { graph });
+    return control.snapshot();
+  });
+  ipcMain.handle(IPC.startRun, async (_event, input: StartRunInput) => {
+    await control.execute("runs.start", input);
+    return control.snapshot();
+  });
+  ipcMain.handle(IPC.stopRun, async (_event, runId: string) => {
+    await control.execute("runs.stop", { runId });
+    return control.snapshot();
+  });
+  ipcMain.handle(IPC.retryRun, async (_event, runId: string) => {
+    await control.execute("runs.retry", { runId });
+    return control.snapshot();
+  });
   ipcMain.handle(IPC.openExternal, async (_event, target: string) => {
     const url = new URL(target);
     if (url.protocol !== "https:" || url.hostname !== "opencode.ai") {
@@ -67,11 +93,10 @@ export function registerIpc(
     if (result) throw new Error(result);
   });
   ipcMain.handle(IPC.exportPatch, async (_event, runId: string) => {
-    const run = service.getRun(runId);
-    if (!run?.artifacts) throw new Error("No patch is available.");
+    const artifacts = await control.execute("runs.artifacts.get", { runId });
     const options: Electron.SaveDialogOptions = {
       title: "Export patch",
-      defaultPath: `spire-${run.id.slice(0, 8)}.patch`,
+      defaultPath: `spire-${runId.slice(0, 8)}.patch`,
       filters: [{ name: "Patch", extensions: ["patch", "diff"] }],
     };
     const window = getWindow();
@@ -79,22 +104,38 @@ export function registerIpc(
       ? await dialog.showSaveDialog(window, options)
       : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return null;
-    await writeFile(result.filePath, run.artifacts.diff, "utf8");
+    await writeFile(result.filePath, artifacts.diff, "utf8");
     return result.filePath;
   });
-  ipcMain.handle(IPC.cleanupWorktree, (_event, runId: string) =>
-    service.cleanupWorktree(runId),
-  );
+  ipcMain.handle(IPC.cleanupWorktree, async (_event, runId: string) => {
+    await control.execute("worktrees.cleanup", { runId });
+    return control.snapshot();
+  });
   ipcMain.handle(IPC.loadWorkspaceLayouts, (_event, graphId: string) =>
-    service.listWorkspaceLayouts(graphId),
+    control.execute("layouts.list", { graphId }),
   );
   ipcMain.handle(IPC.saveWorkspaceLayout, (_event, record: unknown) => {
-    service.saveWorkspaceLayout(record);
+    // The renderer does not await layout saves; layouts.save is synchronous,
+    // so execute() throws validation errors synchronously to the renderer.
+    // Log async failures instead of leaving an unhandled rejection.
+    void control.execute("layouts.save", record).catch((error: unknown) => {
+      console.error("layouts.save failed:", error);
+    });
   });
   ipcMain.handle(IPC.resetWorkspaceLayouts, (_event, graphId: string) => {
-    service.resetWorkspaceLayouts(graphId);
+    void control.execute("layouts.reset", { graphId }).catch((error: unknown) => {
+      console.error("layouts.reset failed:", error);
+    });
   });
   ipcMain.handle(IPC.environment, () => detectEnvironment());
+
+  // Forward trace notifications to the renderer through one dedicated,
+  // allowlisted channel.
+  return control.subscribe((event) => {
+    const window = getWindow();
+    if (!window || window.isDestroyed()) return;
+    window.webContents.send(IPC.traceEvent, event);
+  });
 }
 
 export function sendRunEvent(
