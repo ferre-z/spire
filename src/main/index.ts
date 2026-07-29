@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeTheme } from "electron";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { ControlSocketServer } from "./control/socket-server";
 import { SpireControl } from "./control/spire-control";
 import { SpireDatabase } from "./database";
 import { detectEnvironment, registerIpc, sendRunEvent } from "./ipc";
@@ -16,6 +17,8 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 let mainWindow: BrowserWindow | null = null;
 let database: SpireDatabase | undefined;
 let harness: OpenCodeHarness | undefined;
+let controlSocket: ControlSocketServer | undefined;
+let shutdownStarted = false;
 
 type SeedFixture = {
   settings?: Record<string, string>;
@@ -133,6 +136,12 @@ void app.whenReady().then(() => {
     environment: { appVersion: app.getVersion(), ...detectEnvironment() },
   });
   registerIpc(control, () => mainWindow);
+  // Local control socket for same-user processes (the MCP stdio sidecar).
+  // Failure to bind must not take down the app — control stays over IPC.
+  controlSocket = new ControlSocketServer({ control, baseDir: dataRoot });
+  void controlSocket.start().catch((error: unknown) => {
+    console.error("Failed to start the control socket:", error);
+  });
   createWindow();
 
   app.on("activate", () => {
@@ -144,7 +153,21 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  // The control socket closes before the database: before-quit is
+  // synchronous, so defer the quit once while the socket shuts down.
+  if (controlSocket && !shutdownStarted) {
+    shutdownStarted = true;
+    event.preventDefault();
+    void controlSocket
+      .close()
+      // Quit even if socket teardown fails — never hang shutdown.
+      .then(
+        () => app.quit(),
+        () => app.quit(),
+      );
+    return;
+  }
   harness?.close();
   database?.close();
 });
