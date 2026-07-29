@@ -537,13 +537,19 @@ describe("ControlSocketServer", () => {
     await mkdir(dir, { recursive: true });
     const socketPath = path.join(dir, CONTROL_SOCKET_FILE);
 
-    // A live owner: starting must fail without touching the socket file.
+    // A live owner: starting must fail without touching the socket file or
+    // the live instance's token file.
     const occupant = net.createServer();
     await new Promise<void>((resolve) => {
       occupant.listen(socketPath, () => resolve());
     });
+    const tokenPath = path.join(dir, CONTROL_TOKEN_FILE);
+    const liveToken = "a".repeat(64);
+    await writeFile(tokenPath, liveToken, { mode: 0o600 });
     server = new ControlSocketServer({ control, baseDir });
     await expect(server.start()).rejects.toThrow(/in use/);
+    expect(await readFile(tokenPath, "utf8")).toBe(liveToken);
+    expect((await stat(tokenPath)).mode & 0o777).toBe(0o600);
     await new Promise<void>((resolve) => {
       occupant.close(() => resolve());
     });

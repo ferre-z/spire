@@ -97,14 +97,16 @@ export class ControlSocketServer {
 
     this.socketPath = path.join(dir, CONTROL_SOCKET_FILE);
     this.tokenPath = path.join(dir, CONTROL_TOKEN_FILE);
+    // Probe for a live owner first: overwriting the token before this check
+    // would clobber the running instance's credential on a rejected start.
+    await this.removeStaleSocket();
+
     this.token = randomBytes(32);
     await writeFile(this.tokenPath, this.token.toString("hex"), {
       mode: 0o600,
     });
     // writeFile mode only applies on creation; enforce on existing files too.
     await chmod(this.tokenPath, 0o600);
-
-    await this.removeStaleSocket();
 
     const server = net.createServer((socket) => this.accept(socket));
     this.server = server;
@@ -330,6 +332,12 @@ export class ControlSocketServer {
 
   private send(client: ClientState, frame: ServerFrame): void {
     if (client.socket.destroyed) return;
+    // Same slow-consumer bound as sendEvent: a client pipelining large
+    // requests without reading must not grow our buffer unboundedly.
+    if (client.socket.writableLength > this.maxBufferedEventBytes) {
+      this.dropClient(client);
+      return;
+    }
     client.socket.write(`${JSON.stringify(frame)}\n`);
   }
 
