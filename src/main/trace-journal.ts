@@ -44,12 +44,21 @@ const SENSITIVE_KEYS = new Set([
   "privatekey",
   "sessiontoken",
   "cookie",
+  "clientsecret",
+  "apisecret",
+  "sessionid",
+  "accesskey",
+  "secretaccesskey",
 ]);
 
 /** `Bearer <token>` inside a string, e.g. an Authorization header value. */
 const BEARER_PATTERN = /\bBearer[ \t]+[A-Za-z0-9\-._~+/]{8,}={0,2}\b/gi;
-/** API-key shapes inside a string: `sk-...`, `pk-...`, `xoxb-...`, etc. */
-const API_KEY_PATTERN = /\b(?:sk|pk|rk|xox[baprs]|ghp|gho)-[A-Za-z0-9][A-Za-z0-9_-]{11,}\b/g;
+/**
+ * API-key shapes inside a string: `sk-...`, `pk-...`, `xoxb-...`, plus
+ * GitHub tokens (`ghp_...`, `gho_...`), which use underscore separators.
+ */
+const API_KEY_PATTERN =
+  /\b(?:(?:sk|pk|rk|xox[baprs])-|(?:ghp|gho)_)[A-Za-z0-9][A-Za-z0-9_-]{11,}\b/g;
 
 function scrubString(value: string): string {
   return value
@@ -57,9 +66,31 @@ function scrubString(value: string): string {
     .replace(API_KEY_PATTERN, REDACTED);
 }
 
+/**
+ * Redact a string leaf. Producers often embed JSON payloads as strings (e.g.
+ * tool arguments); when a string parses as a JSON object or array, redact the
+ * parsed structure recursively and re-serialize so key-based rules still
+ * apply. Strings that merely look like JSON but fail to parse fall through
+ * to plain pattern scrubbing.
+ */
+function redactString(value: string): string {
+  const first = value.trimStart().charAt(0);
+  if (first === "{" || first === "[") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (parsed !== null && typeof parsed === "object") {
+        return JSON.stringify(redactValue(parsed as JsonValue));
+      }
+    } catch {
+      // Not JSON after all — scrub as a plain string below.
+    }
+  }
+  return scrubString(value);
+}
+
 function redactValue(value: JsonValue): JsonValue {
   if (typeof value === "string") {
-    return scrubString(value);
+    return redactString(value);
   }
   if (Array.isArray(value)) {
     return value.map(redactValue);
@@ -154,6 +185,16 @@ export class TraceJournal {
     const timestamp = input.timestamp ?? new Date().toISOString();
     const message = scrubString(input.message);
 
+    // Validate the full event shape BEFORE persisting: a schema-invalid
+    // input is rejected here so it can never create a poison row that would
+    // make every later query() hitting it throw in rowToEvent.
+    const validated = traceEventSchema.omit({ sequence: true }).parse({
+      ...input,
+      timestamp,
+      message,
+      payload: redactedPayload,
+    });
+
     const result = this.db
       .prepare(
         `INSERT INTO trace_events
@@ -163,31 +204,33 @@ export class TraceJournal {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        timestamp,
-        input.correlationId,
-        input.runId ?? null,
-        input.nodeId ?? null,
-        input.harnessId ?? null,
-        input.providerId ?? null,
-        input.requestId ?? null,
-        input.kind,
-        input.level,
-        input.subsystem,
-        message,
+        validated.timestamp,
+        validated.correlationId,
+        validated.runId ?? null,
+        validated.nodeId ?? null,
+        validated.harnessId ?? null,
+        validated.providerId ?? null,
+        validated.requestId ?? null,
+        validated.kind,
+        validated.level,
+        validated.subsystem,
+        validated.message,
         payloadJson,
         payloadBytes,
       );
 
-    const event = traceEventSchema.parse({
-      ...input,
-      timestamp,
-      message,
-      payload: redactedPayload,
+    const event: TraceEvent = {
+      ...validated,
       sequence: Number(result.lastInsertRowid),
-    });
+    };
 
     for (const listener of this.listeners) {
-      listener(event);
+      try {
+        listener(event);
+      } catch (error) {
+        // A faulty listener must not break append() or starve the others.
+        console.error("trace listener threw", error);
+      }
     }
 
     this.appendsSincePrune += 1;

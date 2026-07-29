@@ -206,6 +206,123 @@ describe("TraceJournal", () => {
     expect(raw).toContain("no secrets here, bearer of good news");
   });
 
+  it("redacts secrets inside stringified JSON leaves", () => {
+    journal.append(
+      event({
+        payload: {
+          toolArgs: JSON.stringify({ password: "hunter2", keep: "visible" }),
+          nested: JSON.stringify({
+            outer: JSON.stringify({ apiKey: "sk-aaaabbbbccccdddd1111" }),
+          }),
+          listArg: JSON.stringify([{ token: "abc123" }, "plain"]),
+          notJson: "{not really json",
+          untouched: "just a plain string",
+        },
+      }),
+    );
+
+    const stored = journal.query({}).events[0];
+    const payload = stored.payload as Record<string, string>;
+    expect(JSON.parse(payload.toolArgs)).toEqual({
+      password: REDACTED,
+      keep: "visible",
+    });
+    expect(JSON.parse(JSON.parse(payload.nested).outer)).toEqual({
+      apiKey: REDACTED,
+    });
+    expect(JSON.parse(payload.listArg)).toEqual([
+      { token: REDACTED },
+      "plain",
+    ]);
+    expect(payload.notJson).toBe("{not really json");
+    expect(payload.untouched).toBe("just a plain string");
+    expect(JSON.stringify(stored)).not.toContain("hunter2");
+    expect(JSON.stringify(stored)).not.toContain("sk-aaaabbbbccccdddd1111");
+  });
+
+  it("redacts additional common sensitive key names", () => {
+    journal.append(
+      event({
+        payload: {
+          clientSecret: "a",
+          apiSecret: "b",
+          client_secret: "c",
+          sessionId: "d",
+          accessKey: "e",
+          secretAccessKey: "f",
+          keyboard: "keep-me",
+        },
+      }),
+    );
+
+    const stored = journal.query({}).events[0];
+    expect(stored.payload).toEqual({
+      clientSecret: REDACTED,
+      apiSecret: REDACTED,
+      client_secret: REDACTED,
+      sessionId: REDACTED,
+      accessKey: REDACTED,
+      secretAccessKey: REDACTED,
+      keyboard: "keep-me",
+    });
+  });
+
+  it("redacts GitHub token shapes that use underscore separators", () => {
+    const pat = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+    const oauth = "gho_1234567890abcdefghijklmn";
+    journal.append(
+      event({
+        message: `clone failed with ${pat}`,
+        payload: { note: `oauth token ${oauth} expired` },
+      }),
+    );
+
+    const raw = JSON.stringify(journal.query({}).events[0]);
+    expect(raw).not.toContain(pat);
+    expect(raw).not.toContain(oauth);
+  });
+
+  it("rejects schema-invalid input without persisting anything", () => {
+    expect(() =>
+      journal.append(event({ level: "bogus" as never })),
+    ).toThrow();
+    expect(() =>
+      journal.append(event({ timestamp: "not-a-date" })),
+    ).toThrow();
+    expect(journal.query({}).events).toHaveLength(0);
+  });
+
+  it("auto-prunes once every 1,000 appends", () => {
+    // Zero age retention: any prune pass deletes every row already written
+    // (timestamps are in the past), so the row count reveals when the
+    // cadence counter fires.
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const strict = database.createTraceJournal({ retentionMaxAgeMs: 0 });
+    try {
+      for (let index = 0; index < 999; index += 1) {
+        strict.append(event({ timestamp: past }));
+      }
+      expect(strict.query({}).events).toHaveLength(999);
+
+      strict.append(event({ timestamp: past }));
+      expect(strict.query({}).events).toHaveLength(0);
+    } finally {
+      strict.close();
+    }
+  });
+
+  it("isolates listener exceptions so remaining listeners still fire", () => {
+    const received: TraceEvent[] = [];
+    journal.subscribe(() => {
+      throw new Error("listener boom");
+    });
+    journal.subscribe((item) => received.push(item));
+
+    const appended = journal.append(event());
+    expect(received).toHaveLength(1);
+    expect(received[0].sequence).toBe(appended.sequence);
+  });
+
   it("prunes events older than the retention window", () => {
     const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
     journal.append(event({ timestamp: old, message: "ancient" }));
