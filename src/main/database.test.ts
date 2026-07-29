@@ -8,6 +8,35 @@ import {
 } from "../shared/workspace";
 import { SpireDatabase } from "./database";
 
+describe("SpireDatabase trace events", () => {
+  let root: string;
+  let database: SpireDatabase;
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), "spire-db-"));
+    database = new SpireDatabase(path.join(root, "test.sqlite"));
+  });
+
+  afterEach(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("creates the trace_events table alongside the existing tables", () => {
+    const journal = database.createTraceJournal();
+    journal.append({
+      timestamp: new Date().toISOString(),
+      correlationId: "corr-1",
+      kind: "run.lifecycle",
+      level: "info",
+      subsystem: "run-engine",
+      message: "stored in the same database file",
+    });
+    journal.close();
+    expect(journal.query({}).events).toHaveLength(1);
+  });
+});
+
 function record(
   graphId: string,
   mode: "desktop" | "compact",

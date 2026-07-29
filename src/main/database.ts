@@ -4,6 +4,7 @@ import type {
   WorkspaceLayoutMode,
   WorkspaceLayoutRecord,
 } from "../shared/workspace";
+import { TraceJournal, type TraceJournalOptions } from "./trace-journal";
 
 type SettingRow = { value: string };
 type JsonRow = { json: string };
@@ -46,7 +47,41 @@ export class SpireDatabase {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (graph_id, mode)
       );
+      CREATE TABLE IF NOT EXISTS trace_events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        correlation_id TEXT NOT NULL,
+        run_id TEXT,
+        node_id TEXT,
+        harness_id TEXT,
+        provider_id TEXT,
+        request_id TEXT,
+        kind TEXT NOT NULL,
+        level TEXT NOT NULL,
+        subsystem TEXT NOT NULL,
+        message TEXT NOT NULL,
+        payload TEXT,
+        payload_bytes INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_trace_events_timestamp
+        ON trace_events (timestamp);
+      CREATE INDEX IF NOT EXISTS idx_trace_events_correlation_id
+        ON trace_events (correlation_id);
+      CREATE INDEX IF NOT EXISTS idx_trace_events_run_id
+        ON trace_events (run_id);
+      CREATE INDEX IF NOT EXISTS idx_trace_events_node_id
+        ON trace_events (node_id);
+      CREATE INDEX IF NOT EXISTS idx_trace_events_harness_id
+        ON trace_events (harness_id);
+      CREATE INDEX IF NOT EXISTS idx_trace_events_provider_id
+        ON trace_events (provider_id);
+      CREATE INDEX IF NOT EXISTS idx_trace_events_request_id
+        ON trace_events (request_id);
     `);
+  }
+
+  createTraceJournal(options?: TraceJournalOptions): TraceJournal {
+    return new TraceJournal(this.db, options);
   }
 
   getSetting(key: string): string | undefined {
