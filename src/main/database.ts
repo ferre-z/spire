@@ -1,10 +1,41 @@
 import Database from "better-sqlite3";
-import type { GraphDefinition, RunRecord } from "../shared/domain";
+import { z } from "zod";
+import { collaborationMessageSchema } from "../shared/collaboration";
+import type { CollaborationMessage } from "../shared/collaboration";
+import {
+  graphDefinitionV2Schema,
+  harnessIdSchema,
+  type GraphDefinition,
+  type GraphDefinitionV2,
+  type RunRecord,
+} from "../shared/domain";
+import {
+  appliedPlanPatchSchema,
+  executionPlanSchema,
+  nodeExecutionSchema,
+  type AppliedPlanPatch,
+  type ExecutionPlan,
+  type NodeExecution,
+} from "../shared/execution";
 import type {
   WorkspaceLayoutMode,
   WorkspaceLayoutRecord,
 } from "../shared/workspace";
+import { readGraphDefinition } from "./graph-migration";
 import { TraceJournal, type TraceJournalOptions } from "./trace-journal";
+
+/**
+ * Node-scoped harness session: which harness conversation a node of a run is
+ * currently bound to, so the run can resume it after a restart.
+ */
+export const harnessSessionSchema = z.strictObject({
+  runId: z.string().min(1),
+  nodeId: z.string().min(1),
+  harnessId: harnessIdSchema,
+  sessionId: z.string().min(1),
+  updatedAt: z.string().datetime(),
+});
+export type HarnessSession = z.infer<typeof harnessSessionSchema>;
 
 type SettingRow = { value: string };
 type JsonRow = { json: string };
@@ -46,6 +77,41 @@ export class SpireDatabase {
         model TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (graph_id, mode)
+      );
+      CREATE TABLE IF NOT EXISTS execution_plans (
+        run_id TEXT PRIMARY KEY,
+        revision INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS node_executions (
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        visits INTEGER NOT NULL,
+        json TEXT NOT NULL,
+        PRIMARY KEY (run_id, node_id)
+      );
+      CREATE TABLE IF NOT EXISTS collaboration_messages (
+        run_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        json TEXT NOT NULL,
+        PRIMARY KEY (run_id, sequence)
+      );
+      CREATE TABLE IF NOT EXISTS plan_patches (
+        run_id TEXT NOT NULL,
+        applied_revision INTEGER NOT NULL,
+        id TEXT NOT NULL,
+        applied_at TEXT NOT NULL,
+        json TEXT NOT NULL,
+        PRIMARY KEY (run_id, applied_revision)
+      );
+      CREATE TABLE IF NOT EXISTS harness_sessions (
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        json TEXT NOT NULL,
+        PRIMARY KEY (run_id, node_id)
       );
       CREATE TABLE IF NOT EXISTS trace_events (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -183,6 +249,174 @@ export class SpireDatabase {
     this.db
       .prepare("DELETE FROM workspace_layouts WHERE graph_id = ?")
       .run(graphId);
+  }
+
+  /** Save a graph in the v2 format; legacy input must be migrated first. */
+  saveGraphV2(graph: GraphDefinitionV2): void {
+    const validated = graphDefinitionV2Schema.parse(graph);
+    this.db
+      .prepare(
+        `INSERT INTO graphs (id, version, created_at, json) VALUES (?, ?, ?, ?)
+         ON CONFLICT(id, version) DO UPDATE SET json = excluded.json`,
+      )
+      .run(
+        validated.id,
+        validated.version,
+        validated.createdAt,
+        JSON.stringify(validated),
+      );
+  }
+
+  /**
+   * List every stored graph as graph v2. Rows saved by legacy callers are
+   * normalized on read; rows saved via saveGraphV2 are returned as-is.
+   */
+  listGraphsV2(): GraphDefinitionV2[] {
+    return (
+      this.db
+        .prepare("SELECT json FROM graphs ORDER BY created_at DESC")
+        .all() as JsonRow[]
+    ).map((row) => readGraphDefinition(JSON.parse(row.json)));
+  }
+
+  saveExecutionPlan(plan: ExecutionPlan): void {
+    const validated = executionPlanSchema.parse(plan);
+    this.db
+      .prepare(
+        `INSERT INTO execution_plans (run_id, revision, updated_at, json)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET
+           revision = excluded.revision,
+           updated_at = excluded.updated_at,
+           json = excluded.json`,
+      )
+      .run(
+        validated.runId,
+        validated.revision,
+        validated.updatedAt,
+        JSON.stringify(validated),
+      );
+  }
+
+  getExecutionPlan(runId: string): ExecutionPlan | undefined {
+    const row = this.db
+      .prepare("SELECT json FROM execution_plans WHERE run_id = ?")
+      .get(runId) as JsonRow | undefined;
+    return row ? executionPlanSchema.parse(JSON.parse(row.json)) : undefined;
+  }
+
+  saveNodeExecution(runId: string, node: NodeExecution): void {
+    const validated = nodeExecutionSchema.parse(node);
+    this.db
+      .prepare(
+        `INSERT INTO node_executions (run_id, node_id, status, visits, json)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, node_id) DO UPDATE SET
+           status = excluded.status,
+           visits = excluded.visits,
+           json = excluded.json`,
+      )
+      .run(
+        runId,
+        validated.nodeId,
+        validated.status,
+        validated.visits,
+        JSON.stringify(validated),
+      );
+  }
+
+  listNodeExecutions(runId: string): NodeExecution[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT json FROM node_executions WHERE run_id = ?
+           ORDER BY node_id ASC`,
+        )
+        .all(runId) as JsonRow[]
+    ).map((row) => nodeExecutionSchema.parse(JSON.parse(row.json)));
+  }
+
+  /**
+   * Persist a new plan revision and one node's state atomically: either both
+   * writes land or neither does.
+   */
+  savePlanAndNodeExecution(plan: ExecutionPlan, node: NodeExecution): void {
+    this.db.transaction(() => {
+      this.saveExecutionPlan(plan);
+      this.saveNodeExecution(plan.runId, node);
+    })();
+  }
+
+  appendCollaborationMessage(message: CollaborationMessage): void {
+    const validated = collaborationMessageSchema.parse(message);
+    this.db
+      .prepare(
+        `INSERT INTO collaboration_messages (run_id, sequence, created_at, json)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(
+        validated.runId,
+        validated.sequence,
+        validated.createdAt,
+        JSON.stringify(validated),
+      );
+  }
+
+  listCollaborationMessages(runId: string): CollaborationMessage[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT json FROM collaboration_messages WHERE run_id = ?
+           ORDER BY sequence ASC`,
+        )
+        .all(runId) as JsonRow[]
+    ).map((row) => collaborationMessageSchema.parse(JSON.parse(row.json)));
+  }
+
+  savePlanPatch(runId: string, patch: AppliedPlanPatch): void {
+    const validated = appliedPlanPatchSchema.parse(patch);
+    this.db
+      .prepare(
+        `INSERT INTO plan_patches (run_id, applied_revision, id, applied_at, json)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        runId,
+        validated.appliedRevision,
+        validated.id,
+        validated.appliedAt,
+        JSON.stringify(validated),
+      );
+  }
+
+  listPlanPatches(runId: string): AppliedPlanPatch[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT json FROM plan_patches WHERE run_id = ?
+           ORDER BY applied_revision ASC`,
+        )
+        .all(runId) as JsonRow[]
+    ).map((row) => appliedPlanPatchSchema.parse(JSON.parse(row.json)));
+  }
+
+  saveHarnessSession(session: HarnessSession): void {
+    const validated = harnessSessionSchema.parse(session);
+    this.db
+      .prepare(
+        `INSERT INTO harness_sessions (run_id, node_id, json) VALUES (?, ?, ?)
+         ON CONFLICT(run_id, node_id) DO UPDATE SET json = excluded.json`,
+      )
+      .run(validated.runId, validated.nodeId, JSON.stringify(validated));
+  }
+
+  getHarnessSession(runId: string, nodeId: string): HarnessSession | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT json FROM harness_sessions WHERE run_id = ? AND node_id = ?",
+      )
+      .get(runId, nodeId) as JsonRow | undefined;
+    return row ? harnessSessionSchema.parse(JSON.parse(row.json)) : undefined;
   }
 
   close(): void {
