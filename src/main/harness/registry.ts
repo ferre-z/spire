@@ -4,6 +4,9 @@ import type {
   HarnessRegistry,
   HarnessStatus,
 } from "../../shared/harness";
+import { ClaudeCodeAdapter } from "./claude-code";
+import { CodexAdapter } from "./codex";
+import { OpenCodeAdapter } from "./opencode";
 
 /**
  * Canonical adapter order: the order probeAll reports in, regardless of
@@ -71,4 +74,16 @@ export function createHarnessRegistry(
       }
     },
   };
+}
+
+/**
+ * Registry with every built-in adapter in canonical order:
+ * opencode → codex → claude-code.
+ */
+export function createDefaultHarnessRegistry(): HarnessRegistry {
+  return createHarnessRegistry([
+    new OpenCodeAdapter(),
+    new CodexAdapter(),
+    new ClaudeCodeAdapter(),
+  ]);
 }

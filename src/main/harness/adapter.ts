@@ -5,6 +5,89 @@ import type {
 } from "../../shared/harness";
 import { parseJson, repairPrompt } from "../prompts";
 
+/** Maximum size of a single JSONL line from a harness process stream. */
+export const MAX_JSONL_LINE_BYTES = 1024 * 1024;
+
+export type JsonlLine =
+  | { kind: "json"; value: unknown }
+  | { kind: "malformed"; text: string }
+  | { kind: "oversized" };
+
+/**
+ * Incremental JSONL parser shared by the process-based harness adapters.
+ * Buffers partial chunks, tolerates malformed lines (reported, never thrown),
+ * and drops lines over the 1 MiB cap so a runaway stream cannot exhaust
+ * memory. Call `flush` when the stream ends to drain any trailing line.
+ */
+export function createJsonlParser(): {
+  push(chunk: string): JsonlLine[];
+  flush(): JsonlLine[];
+} {
+  let buffer = "";
+  let skippingOversized = false;
+
+  function classify(line: string): JsonlLine {
+    if (line.length === 0) return { kind: "malformed", text: line };
+    try {
+      return { kind: "json", value: JSON.parse(line) as unknown };
+    } catch {
+      return { kind: "malformed", text: line };
+    }
+  }
+
+  function push(chunk: string): JsonlLine[] {
+    const out: JsonlLine[] = [];
+    buffer += chunk;
+    let newline: number;
+    while ((newline = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newline).replace(/\r$/, "");
+      buffer = buffer.slice(newline + 1);
+      if (skippingOversized) {
+        skippingOversized = false;
+        continue;
+      }
+      if (line.length > MAX_JSONL_LINE_BYTES) {
+        out.push({ kind: "oversized" });
+        continue;
+      }
+      if (line.length > 0) out.push(classify(line));
+    }
+    if (buffer.length > MAX_JSONL_LINE_BYTES) {
+      // No newline yet and the line already exceeds the cap: drop it and skip
+      // everything up to the next newline.
+      buffer = "";
+      skippingOversized = true;
+      out.push({ kind: "oversized" });
+    }
+    return out;
+  }
+
+  function flush(): JsonlLine[] {
+    const line = buffer;
+    buffer = "";
+    if (skippingOversized) {
+      skippingOversized = false;
+      return [];
+    }
+    if (line.length === 0) return [];
+    if (line.length > MAX_JSONL_LINE_BYTES) return [{ kind: "oversized" }];
+    return [classify(line)];
+  }
+
+  return { push, flush };
+}
+
+/** Redact credential-looking values from harness stderr before emitting it. */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, "[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(
+      /(api[_-]?key|token|password)([=:]\s*)\S+/gi,
+      (_match, key: string, sep: string) => `${key}${sep}[redacted]`,
+    );
+}
+
 /** Parse model text into JSON when possible; undefined when it is not JSON. */
 export function parseModelJson(text: string): unknown {
   const trimmed = text.trim();
