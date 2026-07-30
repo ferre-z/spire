@@ -9,3 +9,4 @@ test-results/
 *.sqlite-shm
 *.sqlite-wal
 *.log
+.worktrees/
