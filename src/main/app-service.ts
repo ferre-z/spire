@@ -8,7 +8,7 @@ import type {
 import type { WorkspaceLayoutRecord } from "../shared/workspace";
 import { SpireControl } from "./control/spire-control";
 import type { SpireDatabase } from "./database";
-import type { AgentHarness } from "./opencode";
+import type { AgentHarness } from "./harness/opencode";
 import type { RunEngine } from "./run-engine";
 import type { ExecutionBackend } from "./worktree";
 

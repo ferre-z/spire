@@ -15,7 +15,7 @@ import {
 } from "../shared/domain";
 import type { JsonValue } from "../shared/workspace";
 import type { SpireDatabase } from "./database";
-import type { AgentHarness, HarnessPrompt } from "./opencode";
+import type { AgentHarness, HarnessPrompt } from "./harness/opencode";
 import type { TraceJournal } from "./trace-journal";
 import {
   implementationPrompt,
