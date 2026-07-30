@@ -82,10 +82,91 @@ pnpm make
 - `pnpm build` creates an unpacked Linux application under `out/`.
 - `pnpm test:e2e` packages the app and runs the Playwright Electron UI suite
   under Xvfb against seeded, offline fixtures.
+- `pnpm spire:mcp` builds and runs the MCP stdio sidecar (see below).
 - `pnpm make` produces Linux ZIP and `.deb` distributables.
 
 Creating the distributables also requires the host-level `zip`, `dpkg`, and
 `fakeroot` binaries. The unpacked application build does not require them.
+
+## MCP control plane
+
+Spire exposes its full control plane to local MCP clients through a stdio
+sidecar. The sidecar is a plain Node 22+ process (no Electron) that connects
+to the running desktop app's authenticated Unix control socket and serves
+every control capability as MCP tools and resources.
+
+Build the sidecar once:
+
+```bash
+pnpm build:mcp   # emits the self-contained mcp-dist/mcp.js
+```
+
+`pnpm spire:mcp` rebuilds and runs it in one shot, which is convenient for
+manual checks but too slow as an MCP client startup command. Packaged builds
+ship the same bundle at `resources/mcp.js` inside the app directory.
+
+Client setup snippets (adjust the path to your checkout or package):
+
+- Codex (`~/.codex/config.toml`):
+
+  ```toml
+  [mcp_servers.spire]
+  command = "node"
+  args = ["/path/to/spire/mcp-dist/mcp.js"]
+  ```
+
+- Claude Code:
+
+  ```bash
+  claude mcp add spire -- node /path/to/spire/mcp-dist/mcp.js
+  ```
+
+- OpenCode (`opencode.json`):
+
+  ```json
+  {
+    "mcp": {
+      "spire": {
+        "type": "local",
+        "command": ["node", "/path/to/spire/mcp-dist/mcp.js"]
+      }
+    }
+  }
+  ```
+
+- Any generic stdio MCP client: spawn `node /path/to/spire/mcp-dist/mcp.js`
+  and speak standard MCP over its stdin/stdout. stderr carries only
+  diagnostics; stdout is clean JSON-RPC.
+
+### Operation coverage
+
+Every registered control capability maps to exactly one `spire_*` tool:
+state and diagnostics snapshots, graph list/get/save, repository validation,
+run list/get/start/stop/retry, run artifacts, managed worktree cleanup,
+workspace layout list/save/reset, harness list/models, and trace journal
+query/tail. Resources mirror the same data: `spire://state` plus templates
+for `spire://graphs/{graphId}`, `spire://runs/{runId}`,
+`spire://runs/{runId}/artifacts`, and `spire://traces/{runId}`. Live trace
+events stream as MCP logging notifications, so a client can tail an active
+run in real time; the subscription is re-established automatically after a
+reconnect.
+
+### Trust model
+
+- The sidecar requires the Spire desktop app to be running. Without it, the
+  sidecar exits with one actionable error naming the expected socket path
+  and how to launch the app.
+- The app publishes a per-launch random token in
+  `<userData>/control/control.token` (mode 0600, directory 0700). Any process
+  that can read the token already runs as the owning user, so the sidecar
+  trusts same-user local processes; the token rotates on every app launch and
+  is never logged or included in errors.
+- The socket exposes semantic control operations only — validated by the same
+  Zod schemas the Electron IPC adapter uses. There is no raw SQL, shell, or
+  filesystem pass-through.
+- Execution traces are redacted in the SQLite trace journal (the single
+  redaction path) before they cross the socket, so MCP output never contains
+  unredacted API keys, tokens, or credentials.
 
 ## Architecture
 

@@ -13,8 +13,10 @@ import {
   reviewVerdictSchema,
   taskBriefSchema,
 } from "../shared/domain";
+import type { JsonValue } from "../shared/workspace";
 import type { SpireDatabase } from "./database";
 import type { AgentHarness, HarnessPrompt } from "./opencode";
+import type { TraceJournal } from "./trace-journal";
 import {
   implementationPrompt,
   implementationSystem,
@@ -32,6 +34,19 @@ type SessionState = {
   active?: { id: string; directory: string };
 };
 
+/**
+ * Normalize a payload to the JSON domain (drops `undefined` properties, which
+ * the trace journal's `jsonValueSchema` rejects). This is not redaction — the
+ * journal remains the only redaction path for journaled events.
+ */
+function toJsonValue(value: unknown): JsonValue {
+  try {
+    return JSON.parse(JSON.stringify(value ?? null)) as JsonValue;
+  } catch {
+    return String(value);
+  }
+}
+
 export class RunEngine {
   private activeRunId?: string;
   private sessions = new Map<string, SessionState>();
@@ -41,6 +56,7 @@ export class RunEngine {
     private readonly harness: AgentHarness,
     private readonly backend: ExecutionBackend,
     private readonly notify: (event: RunEvent) => void,
+    private readonly journal?: TraceJournal,
   ) {
     const active = database
       .listRuns()
@@ -285,6 +301,20 @@ export class RunEngine {
   ): Promise<string> {
     const sessions = this.sessions.get(run.id)!;
     const role = node.role;
+    this.journalEvent({
+      runId: run.id,
+      nodeId: node.id,
+      harnessId: node.type,
+      kind: "run.prompt",
+      message: `${node.name} prompt sent (${phase})`,
+      payload: {
+        phase,
+        model: node.model,
+        sessionId: sessions[role],
+        system,
+        prompt,
+      },
+    });
     const input: HarnessPrompt = {
       directory: run.artifacts!.worktreePath,
       sessionId: sessions[role],
@@ -300,11 +330,28 @@ export class RunEngine {
           directory: run.artifacts!.worktreePath,
         };
       },
-      onEvent: (kind, message, payload) =>
-        this.emit(run, kind, phase, message, node.id, this.redact(payload)),
+      onEvent: (kind, message, payload) => {
+        this.journalEvent({
+          runId: run.id,
+          nodeId: node.id,
+          harnessId: node.type,
+          kind: `run.${kind}`,
+          message,
+          payload,
+        });
+        this.emit(run, kind, phase, message, node.id, this.redact(payload));
+      },
     };
     const response = await this.harness.prompt(input);
     sessions[role] = response.sessionId;
+    this.journalEvent({
+      runId: run.id,
+      nodeId: node.id,
+      harnessId: node.type,
+      kind: "run.response",
+      message: `${node.name} responded (${phase})`,
+      payload: { phase, sessionId: response.sessionId, text: response.text },
+    });
     this.emit(
       run,
       "message",
@@ -337,6 +384,13 @@ export class RunEngine {
       ? graph?.nodes.find((node) => node.role === role)?.id
       : undefined;
     this.emit(run, "status", status, message, run.activeNodeId);
+    this.journalEvent({
+      runId: run.id,
+      nodeId: run.activeNodeId,
+      kind: "run.transition",
+      message,
+      payload: { status },
+    });
     this.database.saveRun(run);
   }
 
@@ -369,6 +423,12 @@ export class RunEngine {
     run.error = error instanceof Error ? error.message : String(error);
     run.finishedAt = new Date().toISOString();
     this.transition(run, "failed", run.error);
+    this.journalEvent({
+      runId: run.id,
+      kind: "run.failure",
+      level: "error",
+      message: run.error,
+    });
     this.database.saveRun(run);
   }
 
@@ -376,6 +436,41 @@ export class RunEngine {
     const run = this.database.getRun(id);
     if (!run) throw new Error("Run not found.");
     return run;
+  }
+
+  /**
+   * Append a raw execution event to the trace journal (the single redaction
+   * path — payloads here are NOT pre-redacted). The journal is observability,
+   * not control flow: a failed append is logged and never breaks a run. The
+   * run id doubles as the correlation id — the engine has no access to the
+   * control layer's per-operation correlation id.
+   */
+  private journalEvent(input: {
+    runId: string;
+    nodeId?: string;
+    harnessId?: string;
+    kind: string;
+    level?: "info" | "warn" | "error";
+    message: string;
+    payload?: unknown;
+  }): void {
+    if (!this.journal) return;
+    try {
+      this.journal.append({
+        correlationId: input.runId,
+        runId: input.runId,
+        nodeId: input.nodeId,
+        harnessId: input.harnessId,
+        kind: input.kind,
+        level: input.level ?? "info",
+        subsystem: "run-engine",
+        message: input.message,
+        payload:
+          input.payload === undefined ? undefined : toJsonValue(input.payload),
+      });
+    } catch (error) {
+      console.error("trace journal append failed", error);
+    }
   }
 
   private redact(payload: unknown): unknown {

@@ -10,6 +10,7 @@ import type {
   HarnessResponse,
 } from "./opencode";
 import { RunEngine } from "./run-engine";
+import { REDACTED, type TraceJournal } from "./trace-journal";
 import type { ExecutionBackend, PreparedWorkspace } from "./worktree";
 
 class FakeHarness implements AgentHarness {
@@ -181,6 +182,140 @@ describe("RunEngine", () => {
       { timeout: 3000 },
     );
     expect(database.getRun(run.id)?.iteration).toBe(1);
+    database.close();
+  });
+});
+
+describe("RunEngine trace journaling", () => {
+  it("journals transitions, prompts, responses, and tool activity", async () => {
+    const database = new SpireDatabase(":memory:");
+    const journal = database.createTraceJournal();
+    const harness = new FakeHarness([
+      brief,
+      implementation,
+      JSON.stringify({
+        decision: "accepted",
+        evidence: ["value exists"],
+        feedback: [],
+      }),
+    ]);
+    const engine = new RunEngine(
+      database,
+      harness,
+      new FakeBackend(),
+      () => undefined,
+      journal,
+    );
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+
+    const events = journal.query({ runId: run.id }).events;
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((event) => event.runId === run.id)).toBe(true);
+    const kinds = new Set(events.map((event) => event.kind));
+    expect(kinds).toContain("run.transition");
+    expect(kinds).toContain("run.prompt");
+    expect(kinds).toContain("run.response");
+    expect(kinds).toContain("run.tool");
+
+    const plannerPrompt = events.find(
+      (event) => event.kind === "run.prompt" && event.nodeId === "planner",
+    );
+    expect(plannerPrompt).toBeDefined();
+    expect(plannerPrompt?.payload).toMatchObject({
+      prompt: expect.stringContaining("Add value"),
+    });
+    const implementerResponse = events.find(
+      (event) => event.kind === "run.response" && event.nodeId === "implementer",
+    );
+    expect(implementerResponse).toBeDefined();
+    expect(implementerResponse?.payload).toMatchObject({
+      text: expect.stringContaining("Added value"),
+    });
+    const toolEvent = events.find((event) => event.kind === "run.tool");
+    expect(toolEvent?.message).toBe("fake tool completed");
+    database.close();
+  });
+
+  it("persists only redacted secrets from prompts and responses", async () => {
+    const secret = "sk-abcdefghijklmnop";
+    const database = new SpireDatabase(":memory:");
+    const journal = database.createTraceJournal();
+    const harness = new FakeHarness([
+      brief,
+      implementation,
+      JSON.stringify({
+        decision: "accepted",
+        evidence: [`leaked ${secret}`],
+        feedback: [],
+      }),
+    ]);
+    const engine = new RunEngine(
+      database,
+      harness,
+      new FakeBackend(),
+      () => undefined,
+      journal,
+    );
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: "/tmp/repository",
+      goal: `Add value with ${secret}`,
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+
+    const events = journal.query({ runId: run.id }).events;
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(secret);
+    expect(serialized).toContain(REDACTED);
+    database.close();
+  });
+
+  it("keeps the run alive when the journal append throws", async () => {
+    const database = new SpireDatabase(":memory:");
+    const broken = {
+      append: () => {
+        throw new Error("journal down");
+      },
+    } as unknown as TraceJournal;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const harness = new FakeHarness([
+      brief,
+      implementation,
+      JSON.stringify({
+        decision: "accepted",
+        evidence: [],
+        feedback: [],
+      }),
+    ]);
+    const engine = new RunEngine(
+      database,
+      harness,
+      new FakeBackend(),
+      () => undefined,
+      broken,
+    );
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
     database.close();
   });
 });

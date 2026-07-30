@@ -6,6 +6,7 @@ import type {
   RunEvent,
   StartRunInput,
 } from "../shared/domain";
+import type { TraceEvent, TraceFilter } from "../shared/trace";
 import type { WorkspaceLayoutRecord } from "../shared/workspace";
 
 const api: SpireApi = {
@@ -33,11 +34,19 @@ const api: SpireApi = {
   resetWorkspaceLayouts: (graphId: string) =>
     ipcRenderer.invoke(IPC.resetWorkspaceLayouts, graphId),
   environment: () => ipcRenderer.invoke(IPC.environment),
+  queryTraces: (filter: TraceFilter) =>
+    ipcRenderer.invoke(IPC.queryTraces, filter),
   onRunEvent: (listener: (event: RunEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, event: RunEvent) =>
       listener(event);
     ipcRenderer.on(IPC.runEvent, handler);
     return () => ipcRenderer.removeListener(IPC.runEvent, handler);
+  },
+  onTraceEvent: (listener: (event: TraceEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: TraceEvent) =>
+      listener(event);
+    ipcRenderer.on(IPC.traceEvent, handler);
+    return () => ipcRenderer.removeListener(IPC.traceEvent, handler);
   },
 };
 

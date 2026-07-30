@@ -5,6 +5,7 @@ import type {
   RunEvent,
   StartRunInput,
 } from "./domain";
+import type { TraceEvent, TraceFilter, TracePage } from "./trace";
 import type {
   WorkspaceEnvironment,
   WorkspaceLayoutRecord,
@@ -29,7 +30,9 @@ export interface SpireApi {
   saveWorkspaceLayout(record: WorkspaceLayoutRecord): Promise<void>;
   resetWorkspaceLayouts(graphId: string): Promise<void>;
   environment(): Promise<WorkspaceEnvironment>;
+  queryTraces(filter: TraceFilter): Promise<TracePage>;
   onRunEvent(listener: (event: RunEvent) => void): Unsubscribe;
+  onTraceEvent(listener: (event: TraceEvent) => void): Unsubscribe;
 }
 
 export const IPC = {
@@ -49,5 +52,7 @@ export const IPC = {
   saveWorkspaceLayout: "spire:save-workspace-layout",
   resetWorkspaceLayouts: "spire:reset-workspace-layouts",
   environment: "spire:environment",
+  queryTraces: "spire:query-traces",
   runEvent: "spire:run-event",
+  traceEvent: "spire:trace-event",
 } as const;
