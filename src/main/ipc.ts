@@ -9,6 +9,7 @@ import type {
   StartRunInput,
 } from "../shared/domain";
 import type { WorkspaceEnvironment } from "../shared/workspace";
+import type { TraceFilter } from "../shared/trace";
 import type { SpireControl } from "./control/spire-control";
 
 export function detectEnvironment(
@@ -128,6 +129,9 @@ export function registerIpc(
     });
   });
   ipcMain.handle(IPC.environment, () => detectEnvironment());
+  ipcMain.handle(IPC.queryTraces, (_event, filter: TraceFilter) =>
+    control.execute("traces.query", filter),
+  );
 
   // Forward trace notifications to the renderer through one dedicated,
   // allowlisted channel.
