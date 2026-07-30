@@ -30,8 +30,12 @@ function makeEvent(
   };
 }
 
-function page(events: TraceEvent[], nextCursor: TracePage["nextCursor"] = null) {
-  return { events, nextCursor };
+function page(
+  events: TraceEvent[],
+  nextCursor: TracePage["nextCursor"] = null,
+  prevCursor: TracePage["prevCursor"] = null,
+) {
+  return { events, nextCursor, prevCursor };
 }
 
 let queryTraces: ReturnType<typeof vi.fn>;
@@ -107,25 +111,28 @@ afterEach(async () => {
 });
 
 describe("LiveStreamPane (trace journal)", () => {
-  it("loads the first page of trace history on mount", async () => {
+  it("loads the newest page of trace history on mount", async () => {
     queryTraces.mockResolvedValue(
-      page([makeEvent(1), makeEvent(2)], { afterSequence: 2 }),
+      page([makeEvent(8), makeEvent(9)], null, { beforeSequence: 8 }),
     );
     await renderPane();
 
     expect(queryTraces).toHaveBeenCalledTimes(1);
-    expect(queryTraces).toHaveBeenCalledWith({ limit: TRACE_PAGE_SIZE });
+    expect(queryTraces).toHaveBeenCalledWith({
+      limit: TRACE_PAGE_SIZE,
+      direction: "backward",
+    });
     expect(rows()).toHaveLength(2);
-    expect(container!.textContent).toContain("event 1");
-    expect(container!.textContent).toContain("event 2");
+    expect(container!.textContent).toContain("event 8");
+    expect(container!.textContent).toContain("event 9");
   });
 
-  it("loads older rows on demand using the page cursor", async () => {
+  it("loads older rows on demand using the prev cursor", async () => {
     queryTraces
       .mockResolvedValueOnce(
-        page([makeEvent(1), makeEvent(2)], { afterSequence: 2 }),
+        page([makeEvent(4), makeEvent(5)], null, { beforeSequence: 4 }),
       )
-      .mockResolvedValueOnce(page([makeEvent(3)]));
+      .mockResolvedValueOnce(page([makeEvent(2), makeEvent(3)]));
 
     await renderPane();
     const loadOlder = findButton("Load older");
@@ -138,9 +145,14 @@ describe("LiveStreamPane (trace journal)", () => {
     expect(queryTraces).toHaveBeenCalledTimes(2);
     expect(queryTraces).toHaveBeenLastCalledWith({
       limit: TRACE_PAGE_SIZE,
-      cursor: { afterSequence: 2 },
+      direction: "backward",
+      beforeSequence: 4,
     });
-    expect(rows()).toHaveLength(3);
+    expect(rows()).toHaveLength(4);
+    // Older rows merge in ahead of the current window, ascending.
+    expect([...rows()].map((row) => row.getAttribute("data-sequence"))).toEqual(
+      ["2", "3", "4", "5"],
+    );
     // The journal reports no further history, so the button is disabled.
     expect(findButton("Load older").disabled).toBe(true);
   });
@@ -229,6 +241,7 @@ describe("LiveStreamPane (trace journal)", () => {
       level: "error",
       kind: "run.stop",
       limit: TRACE_PAGE_SIZE,
+      direction: "backward",
     });
   });
 
@@ -243,7 +256,10 @@ describe("LiveStreamPane (trace journal)", () => {
       await useAppStore.getState().setTraceFilters({ text: "needle" });
     });
 
-    expect(queryTraces).toHaveBeenCalledWith({ limit: TRACE_PAGE_SIZE });
+    expect(queryTraces).toHaveBeenCalledWith({
+      limit: TRACE_PAGE_SIZE,
+      direction: "backward",
+    });
     expect(rows()).toHaveLength(1);
     expect(container!.textContent).toContain("has needle inside");
     expect(container!.textContent).not.toContain("event 2");
@@ -271,6 +287,7 @@ describe("LiveStreamPane (trace journal)", () => {
     expect(queryTraces).toHaveBeenCalledWith({
       runId: "run-9",
       limit: TRACE_PAGE_SIZE,
+      direction: "backward",
     });
     expect(container!.textContent).toContain("event 9");
   });
@@ -343,6 +360,7 @@ describe("LiveStreamPane (trace journal)", () => {
     expect(queryTraces).toHaveBeenCalledWith({
       correlationId: "corr-target",
       limit: TRACE_PAGE_SIZE,
+      direction: "backward",
     });
   });
 });

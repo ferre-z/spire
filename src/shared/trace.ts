@@ -43,6 +43,12 @@ export const traceCursorSchema = z.strictObject({
 });
 export type TraceCursor = z.infer<typeof traceCursorSchema>;
 
+/** Position into the trace journal for paging back: events before this sequence number. */
+export const tracePrevCursorSchema = z.strictObject({
+  beforeSequence: z.number().int().positive(),
+});
+export type TracePrevCursor = z.infer<typeof tracePrevCursorSchema>;
+
 export const traceFilterSchema = z.strictObject({
   runId: z.string().min(1).optional(),
   nodeId: z.string().min(1).optional(),
@@ -56,12 +62,22 @@ export const traceFilterSchema = z.strictObject({
   since: z.string().datetime().optional(),
   limit: z.number().int().min(1).max(TRACE_QUERY_MAX_LIMIT).optional(),
   cursor: traceCursorSchema.optional(),
+  /**
+   * Read direction: "forward" (default) pages from the cursor toward newer
+   * rows; "backward" returns the newest page at or below beforeSequence (or
+   * the journal tail when omitted) for "load older" style history paging.
+   */
+  direction: z.enum(["forward", "backward"]).optional(),
+  /** Exclusive upper bound on sequence, used with direction "backward". */
+  beforeSequence: z.number().int().positive().optional(),
 });
 export type TraceFilter = z.infer<typeof traceFilterSchema>;
 
 export const tracePageSchema = z.strictObject({
   events: z.array(traceEventSchema),
   nextCursor: traceCursorSchema.nullable(),
+  /** Points at older rows; null when no older rows remain. */
+  prevCursor: tracePrevCursorSchema.nullable().optional(),
 });
 export type TracePage = z.infer<typeof tracePageSchema>;
 

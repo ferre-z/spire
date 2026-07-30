@@ -10,6 +10,7 @@ import type {
   TraceFilter,
   TraceLevel,
   TracePage,
+  TracePrevCursor,
 } from "../shared/trace";
 
 /** Maximum number of trace rows kept in the rendered window. */
@@ -109,8 +110,8 @@ type AppState = {
   traceWindow: TraceEvent[];
   /** Newest journal sequence seen; survives pane remounts for reconnect. */
   traceCursor: TraceCursor | null;
-  /** Forward cursor for paging older history; undefined until exhausted/started. */
-  traceBackfillCursor?: TraceCursor;
+  /** Backward cursor for paging older history; undefined until exhausted/started. */
+  traceBackfillCursor?: TracePrevCursor;
   traceHasOlder: boolean;
   traceLoading: boolean;
   traceFilters: TraceFilters;
@@ -239,16 +240,21 @@ export const useAppStore = create<AppState>((set, get) => {
     if (state.traceLoading || !state.traceHasOlder) return;
     set({ traceLoading: true });
     try {
+      // Backward paging: with no backfill cursor this fetches the newest page
+      // (journal tail); afterwards it walks back via the page's prevCursor.
       const filter: TraceFilter = {
         ...toTraceFilter(state.traceFilters),
         limit: TRACE_PAGE_SIZE,
+        direction: "backward",
       };
-      if (state.traceBackfillCursor) filter.cursor = state.traceBackfillCursor;
+      if (state.traceBackfillCursor) {
+        filter.beforeSequence = state.traceBackfillCursor.beforeSequence;
+      }
       const page = await window.spire.queryTraces(filter);
       mergePage(page);
       set({
-        traceBackfillCursor: page.nextCursor ?? undefined,
-        traceHasOlder: page.nextCursor !== null,
+        traceBackfillCursor: page.prevCursor ?? undefined,
+        traceHasOlder: (page.prevCursor ?? null) !== null,
       });
     } catch (error) {
       traceError(error);

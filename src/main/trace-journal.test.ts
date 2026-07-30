@@ -123,6 +123,93 @@ describe("TraceJournal", () => {
     ]);
   });
 
+  it("returns the newest page when paging backward without a bound", () => {
+    for (let index = 0; index < 5; index += 1) {
+      journal.append(event({ message: `event-${index}` }));
+    }
+
+    const page = journal.query({ limit: 2, direction: "backward" });
+    // Presented ascending even though the page was read newest-first.
+    expect(page.events.map((item) => item.sequence)).toEqual([4, 5]);
+    expect(page.events.map((item) => item.message)).toEqual([
+      "event-3",
+      "event-4",
+    ]);
+    expect(page.nextCursor).toBeNull();
+    expect(page.prevCursor).toEqual({ beforeSequence: 4 });
+  });
+
+  it("pages back through history with beforeSequence until exhausted", () => {
+    for (let index = 0; index < 5; index += 1) {
+      journal.append(event({ message: `event-${index}` }));
+    }
+
+    const latest = journal.query({ limit: 2, direction: "backward" });
+    const middle = journal.query({
+      limit: 2,
+      direction: "backward",
+      beforeSequence: latest.prevCursor!.beforeSequence,
+    });
+    expect(middle.events.map((item) => item.message)).toEqual([
+      "event-1",
+      "event-2",
+    ]);
+    expect(middle.prevCursor).toEqual({ beforeSequence: 2 });
+
+    const oldest = journal.query({
+      limit: 2,
+      direction: "backward",
+      beforeSequence: middle.prevCursor!.beforeSequence,
+    });
+    expect(oldest.events.map((item) => item.message)).toEqual(["event-0"]);
+    // Short page: history is exhausted, no further prev cursor.
+    expect(oldest.prevCursor).toBeNull();
+    expect(oldest.nextCursor).toBeNull();
+  });
+
+  it("returns an empty page when nothing is older than beforeSequence", () => {
+    journal.append(event());
+
+    const page = journal.query({
+      limit: 2,
+      direction: "backward",
+      beforeSequence: 1,
+    });
+    expect(page.events).toEqual([]);
+    expect(page.prevCursor).toBeNull();
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("applies filters while paging backward", () => {
+    journal.append(event({ runId: "run-1", message: "first" }));
+    journal.append(event({ runId: "run-2", message: "other run" }));
+    journal.append(event({ runId: "run-1", message: "latest" }));
+
+    const page = journal.query({
+      runId: "run-1",
+      limit: 1,
+      direction: "backward",
+    });
+    expect(page.events.map((item) => item.message)).toEqual(["latest"]);
+    expect(page.prevCursor).toEqual({ beforeSequence: 3 });
+  });
+
+  it("keeps forward pagination identical when direction is omitted or forward", () => {
+    for (let index = 0; index < 3; index += 1) {
+      journal.append(event({ message: `event-${index}` }));
+    }
+
+    for (const filter of [
+      { limit: 2 },
+      { limit: 2, direction: "forward" as const },
+    ]) {
+      const page = journal.query(filter);
+      expect(page.events.map((item) => item.sequence)).toEqual([1, 2]);
+      expect(page.nextCursor).toEqual({ afterSequence: 2 });
+      expect(page.prevCursor).toBeNull();
+    }
+  });
+
   it("notifies subscribers with the persisted redacted event", () => {
     const received: TraceEvent[] = [];
     const unsubscribe = journal.subscribe((item) => received.push(item));

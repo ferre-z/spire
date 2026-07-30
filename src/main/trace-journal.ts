@@ -271,6 +271,11 @@ export class TraceJournal {
       conditions.push("sequence > ?");
       params.push(filter.cursor.afterSequence);
     }
+    const backward = filter.direction === "backward";
+    if (backward && filter.beforeSequence !== undefined) {
+      conditions.push("sequence < ?");
+      params.push(filter.beforeSequence);
+    }
 
     const where =
       conditions.length === 0 ? "" : `WHERE ${conditions.join(" AND ")}`;
@@ -281,17 +286,27 @@ export class TraceJournal {
                 harness_id, provider_id, request_id, kind, level, subsystem,
                 message, payload
          FROM trace_events ${where}
-         ORDER BY sequence ASC
+         ORDER BY sequence ${backward ? "DESC" : "ASC"}
          LIMIT ?`,
       )
       .all(...params, limit) as TraceRow[];
+
+    if (backward) {
+      // Read newest-first, present ascending. A full page implies older rows
+      // remain, so prevCursor points before the oldest row of the page.
+      rows.reverse();
+      const events = rows.map(rowToEvent);
+      const prevCursor =
+        rows.length === limit ? { beforeSequence: rows[0].sequence } : null;
+      return { events, nextCursor: null, prevCursor };
+    }
 
     const events = rows.map(rowToEvent);
     const nextCursor =
       rows.length === limit
         ? { afterSequence: rows[rows.length - 1].sequence }
         : null;
-    return { events, nextCursor };
+    return { events, nextCursor, prevCursor: null };
   }
 
   subscribe(listener: TraceListener): () => void {
