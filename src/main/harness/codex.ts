@@ -1,7 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { ModelOption } from "../../shared/domain";
@@ -26,8 +25,13 @@ const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_KILL_GRACE_MS = 2_000;
 
 export type CodexAdapterOptions = {
-  /** Root for temporary output-schema files (Spire run data). */
-  dataDir?: string;
+  /**
+   * Root for temporary output-schema files (Spire run data). Required —
+   * the caller resolves the data root (`process.env.SPIRE_USER_DATA ??
+   * app.getPath("userData")` in main) so schema files never land in a
+   * shared tmpdir.
+   */
+  dataDir: string;
   timeoutMs?: number;
   /** Grace period between SIGTERM and SIGKILL when terminating a run. */
   killGraceMs?: number;
@@ -169,11 +173,8 @@ export class CodexAdapter implements HarnessAdapter {
   private readonly killGraceMs: number;
   private readonly active = new Map<string, ActiveRun>();
 
-  constructor(options: CodexAdapterOptions = {}) {
-    this.dataDir =
-      options.dataDir ??
-      process.env.SPIRE_USER_DATA ??
-      path.join(tmpdir(), "spire");
+  constructor(options: CodexAdapterOptions) {
+    this.dataDir = options.dataDir;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
   }

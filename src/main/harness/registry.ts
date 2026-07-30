@@ -79,11 +79,15 @@ export function createHarnessRegistry(
 /**
  * Registry with every built-in adapter in canonical order:
  * opencode → codex → claude-code.
+ *
+ * `dataDir` is the Spire run-data root (the caller resolves
+ * `process.env.SPIRE_USER_DATA ?? app.getPath("userData")`); the Codex
+ * adapter writes its temporary output-schema files beneath it.
  */
-export function createDefaultHarnessRegistry(): HarnessRegistry {
+export function createDefaultHarnessRegistry(dataDir: string): HarnessRegistry {
   return createHarnessRegistry([
     new OpenCodeAdapter(),
-    new CodexAdapter(),
+    new CodexAdapter({ dataDir }),
     new ClaudeCodeAdapter(),
   ]);
 }

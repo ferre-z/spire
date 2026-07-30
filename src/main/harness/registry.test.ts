@@ -5,7 +5,34 @@ import type {
   HarnessRunResult,
   HarnessStatus,
 } from "../../shared/harness";
-import { createHarnessRegistry } from "./registry";
+import { createDefaultHarnessRegistry, createHarnessRegistry } from "./registry";
+
+const codexCtorArgs = vi.hoisted(() => [] as Array<{ dataDir: string }>);
+
+vi.mock("./codex", () => ({
+  CodexAdapter: class {
+    readonly id = "codex" as const;
+    constructor(options: { dataDir: string }) {
+      codexCtorArgs.push(options);
+    }
+    async probe(): Promise<HarnessStatus> {
+      return {
+        harnessId: "codex",
+        installed: false,
+        compatible: false,
+        connected: false,
+      };
+    }
+    async listModels() {
+      return [];
+    }
+    async run(): Promise<HarnessRunResult> {
+      throw new Error("not implemented");
+    }
+    async abort() {}
+    async close() {}
+  },
+}));
 
 function fakeAdapter(
   id: HarnessId,
@@ -94,5 +121,14 @@ describe("createHarnessRegistry", () => {
     await expect(registry.closeAll()).rejects.toThrow(/close failed/);
     expect(failing.closeMock).toHaveBeenCalledTimes(1);
     expect(healthy.closeMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createDefaultHarnessRegistry", () => {
+  it("passes the data root through to the Codex adapter", () => {
+    codexCtorArgs.length = 0;
+    const registry = createDefaultHarnessRegistry("/tmp/spire-user-data");
+    expect(registry.get("codex").id).toBe("codex");
+    expect(codexCtorArgs).toEqual([{ dataDir: "/tmp/spire-user-data" }]);
   });
 });

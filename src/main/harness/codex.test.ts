@@ -116,7 +116,7 @@ describe("CodexAdapter probe", () => {
   });
 
   it("reports installed, version, and login state from the CLI", async () => {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ dataDir: DATA_DIR });
     await expect(adapter.probe()).resolves.toEqual({
       harnessId: "codex",
       installed: true,
@@ -129,7 +129,7 @@ describe("CodexAdapter probe", () => {
 
   it("reports connected:false when codex login status fails", async () => {
     mockInstalledBinary({ loggedIn: false });
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ dataDir: DATA_DIR });
     await expect(adapter.probe()).resolves.toMatchObject({
       installed: true,
       connected: false,
@@ -142,7 +142,7 @@ describe("CodexAdapter probe", () => {
         callback(new Error("not found"));
       },
     );
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ dataDir: DATA_DIR });
     await expect(adapter.probe()).resolves.toMatchObject({
       harnessId: "codex",
       installed: false,
@@ -215,6 +215,23 @@ describe("CodexAdapter run", () => {
       schemaPath,
       expect.objectContaining({ force: true }),
     );
+  });
+
+  it("ignores SPIRE_USER_DATA and writes schemas under the explicit dataDir", async () => {
+    process.env.SPIRE_USER_DATA = "/tmp/e2e-override";
+    try {
+      const adapter = new CodexAdapter({ dataDir: DATA_DIR });
+      const { runPromise, proc } = await startRun(adapter, runInput());
+      feedFixture(proc);
+      proc.emit("exit", 0, null);
+      await runPromise;
+
+      const [schemaPath] = mocks.writeFile.mock.calls[0] as [string];
+      expect(schemaPath.startsWith(DATA_DIR)).toBe(true);
+      expect(schemaPath.startsWith("/tmp/e2e-override")).toBe(false);
+    } finally {
+      delete process.env.SPIRE_USER_DATA;
+    }
   });
 
   it("emits the session ref and parses the structured agent message", async () => {
