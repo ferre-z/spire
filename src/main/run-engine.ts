@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentNode,
   GraphDefinition,
+  LegacyAgentNode,
   RunEvent,
   RunRecord,
   RunStatus,
@@ -266,7 +266,7 @@ export class RunEngine {
 
   private async structuredPrompt<T>(
     run: RunRecord,
-    node: AgentNode,
+    node: LegacyAgentNode,
     phase: Extract<RunStatus, "planning" | "implementing" | "reviewing">,
     system: string,
     prompt: string,
@@ -297,7 +297,7 @@ export class RunEngine {
 
   private async send(
     run: RunRecord,
-    node: AgentNode,
+    node: LegacyAgentNode,
     phase: string,
     system: string,
     prompt: string,

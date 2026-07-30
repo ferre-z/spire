@@ -1,5 +1,5 @@
 import { ChevronDown, Cpu, MousePointer2, Save } from "lucide-react";
-import type { AgentNode } from "../../shared/domain";
+import type { LegacyAgentNode } from "../../shared/domain";
 import { useAppStore } from "../store";
 import { useSaveGraph } from "./GraphSettingsPane";
 
@@ -11,7 +11,7 @@ export function NodeInspectorPane() {
   const save = useSaveGraph();
   const node = graph.nodes.find((item) => item.id === selectedNodeId);
 
-  function updateNode(patch: Partial<AgentNode>) {
+  function updateNode(patch: Partial<LegacyAgentNode>) {
     updateGraph({
       ...graph,
       nodes: graph.nodes.map((item) =>

@@ -1,6 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { Bot, BrainCircuit, CircleCheck, LoaderCircle } from "lucide-react";
-import type { AgentNode as AgentNodeType, RunStatus } from "../../shared/domain";
+import type { LegacyAgentNode as AgentNodeType, RunStatus } from "../../shared/domain";
 
 export type AgentFlowNode = Node<{
   agent: AgentNodeType;

@@ -12,7 +12,7 @@ export const agentNodeSchema = z.object({
   model: z.string().min(1),
   position: z.object({ x: z.number(), y: z.number() }),
 });
-export type AgentNode = z.infer<typeof agentNodeSchema>;
+export type LegacyAgentNode = z.infer<typeof agentNodeSchema>;
 
 export const graphEdgeSchema = z.object({
   id: z.string().min(1),
@@ -21,7 +21,7 @@ export const graphEdgeSchema = z.object({
   condition: z.enum(["always", "accepted", "needs_changes"]),
   label: z.string().min(1),
 });
-export type GraphEdge = z.infer<typeof graphEdgeSchema>;
+export type LegacyGraphEdge = z.infer<typeof graphEdgeSchema>;
 
 export const graphDefinitionSchema = z
   .object({
@@ -52,6 +52,189 @@ export const graphDefinitionSchema = z
     }
   });
 export type GraphDefinition = z.infer<typeof graphDefinitionSchema>;
+
+export const harnessIdSchema = z.enum(["opencode", "codex", "claude-code"]);
+export type HarnessId = z.infer<typeof harnessIdSchema>;
+
+export const nodeKindSchema = z.enum([
+  "agent",
+  "decision",
+  "checkpoint",
+  "subgraph",
+]);
+export type NodeKind = z.infer<typeof nodeKindSchema>;
+
+export const planMutationSchema = z.enum([
+  "retry",
+  "skip",
+  "reorder",
+  "reroute",
+  "pause",
+  "replace",
+  "insert",
+  "remove",
+  "edit",
+]);
+export type PlanMutation = z.infer<typeof planMutationSchema>;
+
+export const nodeAuthoritySchema = z.strictObject({
+  scope: z.enum(["self", "connected", "group", "graph"]).default("self"),
+  actions: z.array(planMutationSchema).default([]),
+});
+export type NodeAuthority = z.infer<typeof nodeAuthoritySchema>;
+
+const nodeAccessSchema = z.strictObject({
+  mode: z.enum(["read-only", "workspace-write"]).default("read-only"),
+  writeScopes: z.array(z.string()).default([]),
+});
+
+const nodePositionSchema = z.strictObject({
+  x: z.number(),
+  y: z.number(),
+});
+
+const agentLikeShape = {
+  id: z.string().min(1),
+  name: z.string().min(1),
+  roleLabel: z.string().min(1).optional(),
+  job: z.string().min(1),
+  harnessId: harnessIdSchema,
+  modelId: z.string().min(1),
+  access: nodeAccessSchema.default({ mode: "read-only", writeScopes: [] }),
+  authority: nodeAuthoritySchema.default({ scope: "self", actions: [] }),
+  activation: z.enum(["all", "any"]).default("all"),
+  maxVisits: z.number().int().positive().default(3),
+  groupId: z.string().min(1).optional(),
+  position: nodePositionSchema,
+};
+
+export const agentNodeV2Schema = z.strictObject({
+  ...agentLikeShape,
+  kind: z.literal("agent"),
+});
+export type AgentNode = z.infer<typeof agentNodeV2Schema>;
+
+export const decisionNodeV2Schema = z.strictObject({
+  ...agentLikeShape,
+  kind: z.literal("decision"),
+});
+export type DecisionNode = z.infer<typeof decisionNodeV2Schema>;
+
+export const checkpointNodeV2Schema = z.strictObject({
+  kind: z.literal("checkpoint"),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  mode: z.enum(["automatic", "manual"]),
+  groupId: z.string().min(1).optional(),
+  position: nodePositionSchema,
+});
+export type CheckpointNode = z.infer<typeof checkpointNodeV2Schema>;
+
+export const subgraphNodeV2Schema = z.strictObject({
+  kind: z.literal("subgraph"),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  graphId: z.string().min(1),
+  graphVersion: z.number().int().positive().optional(),
+  groupId: z.string().min(1).optional(),
+  position: nodePositionSchema,
+});
+export type SubgraphNode = z.infer<typeof subgraphNodeV2Schema>;
+
+export const graphNodeV2Schema = z.discriminatedUnion("kind", [
+  agentNodeV2Schema,
+  decisionNodeV2Schema,
+  checkpointNodeV2Schema,
+  subgraphNodeV2Schema,
+]);
+export type GraphNode = z.infer<typeof graphNodeV2Schema>;
+
+export const graphEdgeV2Schema = z.strictObject({
+  id: z.string().min(1),
+  source: z.string().min(1),
+  target: z.string().min(1),
+  kind: z.enum(["dependency", "handoff", "review", "approval", "escalation"]),
+  when: z.enum(["always", "success", "failure", "selected"]),
+  label: z.string().min(1),
+});
+export type GraphEdge = z.infer<typeof graphEdgeV2Schema>;
+
+export const graphGroupSchema = z.strictObject({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  parentGroupId: z.string().min(1).optional(),
+});
+export type GraphGroup = z.infer<typeof graphGroupSchema>;
+
+export const graphDefinitionV2Schema = z
+  .strictObject({
+    id: z.string().min(1),
+    name: z.string().min(1).max(120),
+    version: z.number().int().positive(),
+    nodes: z.array(graphNodeV2Schema).min(1),
+    edges: z.array(graphEdgeV2Schema).default([]),
+    groups: z.array(graphGroupSchema).default([]),
+    maxSteps: z.number().int().positive().default(100),
+    createdAt: z.string().datetime(),
+  })
+  .superRefine((graph, context) => {
+    const nodeIds = new Set<string>();
+    for (const node of graph.nodes) {
+      if (nodeIds.has(node.id)) {
+        context.addIssue({
+          code: "custom",
+          message: `Duplicate node id ${node.id}.`,
+        });
+      }
+      nodeIds.add(node.id);
+      if (node.kind === "subgraph" && node.graphId === graph.id) {
+        context.addIssue({
+          code: "custom",
+          message: `Subgraph node ${node.id} references its own graph.`,
+        });
+      }
+    }
+    const edgeIds = new Set<string>();
+    for (const edge of graph.edges) {
+      if (edgeIds.has(edge.id)) {
+        context.addIssue({
+          code: "custom",
+          message: `Duplicate edge id ${edge.id}.`,
+        });
+      }
+      edgeIds.add(edge.id);
+      if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
+        context.addIssue({
+          code: "custom",
+          message: `Edge ${edge.id} references an unknown node.`,
+        });
+      }
+    }
+    const groupIds = new Set(graph.groups.map((group) => group.id));
+    if (groupIds.size !== graph.groups.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Duplicate group id.",
+      });
+    }
+    for (const group of graph.groups) {
+      if (group.parentGroupId && !groupIds.has(group.parentGroupId)) {
+        context.addIssue({
+          code: "custom",
+          message: `Group ${group.id} references an unknown group.`,
+        });
+      }
+    }
+    for (const node of graph.nodes) {
+      if (node.groupId && !groupIds.has(node.groupId)) {
+        context.addIssue({
+          code: "custom",
+          message: `Node ${node.id} references an unknown group.`,
+        });
+      }
+    }
+  });
+export type GraphDefinitionV2 = z.infer<typeof graphDefinitionV2Schema>;
 
 export const taskBriefSchema = z.object({
   goal: z.string().min(1),

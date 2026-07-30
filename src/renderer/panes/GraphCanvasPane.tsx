@@ -13,7 +13,7 @@ import {
   type NodeChange,
   applyNodeChanges,
 } from "@xyflow/react";
-import type { AgentNode as DomainAgentNode } from "../../shared/domain";
+import type { LegacyAgentNode as DomainAgentNode } from "../../shared/domain";
 import { useAppStore } from "../store";
 import { AgentNode, type AgentFlowNode } from "../components/AgentNode";
 
