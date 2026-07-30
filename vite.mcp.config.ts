@@ -8,9 +8,10 @@ export default defineConfig({
   // standalone, without node_modules, inside packaged builds.
   ssr: { noExternal: true },
   build: {
-    // Separate from .vite/build: the forge Vite plugin empties that
-    // directory when it builds the main/preload targets during packaging.
-    outDir: ".vite/mcp",
+    // Outside .vite: the forge Vite plugin removes the whole .vite
+    // directory in its own prePackage hook, which runs after the config
+    // hook that builds this bundle.
+    outDir: "mcp-dist",
     emptyOutDir: true,
     ssr: "src/mcp/index.ts",
     target: "node22",

@@ -16,7 +16,7 @@ const config = {
     executableName: "spire",
     // Ship the self-contained MCP stdio sidecar next to the app so MCP
     // clients can run it with any Node 22+ (`node resources/mcp.js`).
-    extraResource: [".vite/mcp/mcp.js"],
+    extraResource: ["mcp-dist/mcp.js"],
     ignore: (file: string) => {
       if (!file) return false;
       const runtimePaths = [

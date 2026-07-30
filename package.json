@@ -9,7 +9,7 @@
     "build": "electron-forge package",
     "make": "electron-forge make",
     "build:mcp": "vite build --config vite.mcp.config.ts",
-    "spire:mcp": "pnpm build:mcp && node .vite/mcp/mcp.js",
+    "spire:mcp": "pnpm build:mcp && node mcp-dist/mcp.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

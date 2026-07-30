@@ -94,6 +94,10 @@ test.describe("visual regression", () => {
     await waitForLayoutSave(page);
     await expect(popout).toHaveScreenshot("popout-window.png", {
       animations: "disabled",
+      // The trace-backed Live Stream pane renders journaled control events
+      // with random correlation ids and wall-clock timestamps; only the
+      // pane chrome and filter bar are stable enough to compare.
+      mask: [popout.locator(".event-stream"), popout.locator(".run-actions")],
     });
   });
 });
