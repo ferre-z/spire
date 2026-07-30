@@ -1,5 +1,10 @@
 # Multi-Harness Support Implementation Plan
 
+> **Superseded:** Do not execute this plan. Its adapter work has been revised
+> and incorporated into
+> `2026-07-30-graph-native-corporate-workflows.md`, which removes the
+> planner/implementer and two-node-loop assumptions.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let each graph node independently run through OpenCode, Claude Code, Codex, or Hermes with normalized sessions, events, structured responses, and cancellation.
