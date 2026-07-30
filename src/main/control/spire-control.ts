@@ -112,6 +112,26 @@ function toJsonValue(value: unknown): JsonValue {
   }
 }
 
+/**
+ * Maximum byte size for a control.success payload stored in the trace journal.
+ * Operations that return large data (e.g. traces.query) would otherwise create
+ * an echo-chamber: the full result is stored as a journal event, then the next
+ * query returns a larger set that includes that event, growing exponentially.
+ */
+const JOURNAL_PAYLOAD_MAX_BYTES = 8_192;
+
+function cappedJsonValue(value: unknown): JsonValue {
+  const full = toJsonValue(value);
+  const json = JSON.stringify(full);
+  if (Buffer.byteLength(json, "utf8") <= JOURNAL_PAYLOAD_MAX_BYTES) return full;
+  const truncated = json.slice(0, JOURNAL_PAYLOAD_MAX_BYTES);
+  try {
+    return JSON.parse(truncated + '"…truncated"}');
+  } catch {
+    return truncated + "…";
+  }
+}
+
 function parseCursor(cursor: string | undefined): number {
   if (cursor === undefined) return 0;
   const offset = Number.parseInt(cursor, 10);
@@ -223,7 +243,7 @@ export class SpireControl {
           level: "info",
           subsystem: TRACE_SUBSYSTEM,
           message: `${name} succeeded`,
-          payload: { output: toJsonValue(validated) },
+          payload: { output: cappedJsonValue(validated) },
         });
         return validated;
       },

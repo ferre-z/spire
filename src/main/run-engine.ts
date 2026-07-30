@@ -28,6 +28,9 @@ import {
 } from "./prompts";
 import type { ExecutionBackend } from "./worktree";
 
+/** Maximum number of RunEvents kept in a RunRecord's events array. */
+const MAX_RUN_EVENTS = 200;
+
 type SessionState = {
   planner?: string;
   implementer?: string;
@@ -414,6 +417,9 @@ export class RunEngine {
       payload,
     };
     run.events.push(event);
+    if (run.events.length > MAX_RUN_EVENTS) {
+      run.events = run.events.slice(-MAX_RUN_EVENTS);
+    }
     this.database.saveRun(run);
     this.notify(event);
   }
