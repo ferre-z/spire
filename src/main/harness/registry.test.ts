@@ -3,7 +3,7 @@ import type { HarnessId } from "../../shared/domain";
 import type {
   HarnessAdapter,
   HarnessRunResult,
-  HarnessStatus,
+  HarnessProbeStatus,
 } from "../../shared/harness";
 import { createDefaultHarnessRegistry, createHarnessRegistry } from "./registry";
 
@@ -15,7 +15,7 @@ vi.mock("./codex", () => ({
     constructor(options: { dataDir: string }) {
       codexCtorArgs.push(options);
     }
-    async probe(): Promise<HarnessStatus> {
+    async probe(): Promise<HarnessProbeStatus> {
       return {
         harnessId: "codex",
         installed: false,
@@ -42,7 +42,7 @@ function fakeAdapter(
   return {
     id,
     closeMock,
-    probe: async (): Promise<HarnessStatus> => ({
+    probe: async (): Promise<HarnessProbeStatus> => ({
       harnessId: id,
       installed: true,
       compatible: true,

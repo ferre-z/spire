@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CollaborationMessage } from "../shared/collaboration";
 import type { GraphDefinition } from "../shared/domain";
@@ -9,11 +10,12 @@ import type {
   ExecutionPlan,
   NodeExecution,
 } from "../shared/execution";
+import type { HarnessSession } from "../shared/harness";
 import {
   WORKSPACE_LAYOUT_SCHEMA_VERSION,
   type WorkspaceLayoutRecord,
 } from "../shared/workspace";
-import { SpireDatabase, type HarnessSession } from "./database";
+import { SpireDatabase } from "./database";
 import { migrateLegacyGraph } from "./graph-migration";
 
 describe("SpireDatabase trace events", () => {
@@ -276,6 +278,7 @@ function sessionFixture(
     nodeId: "implementer",
     harnessId: "opencode",
     sessionId: "sess-abc",
+    directory: "/tmp/work",
     updatedAt: "2026-07-30T10:02:00.000Z",
     ...overrides,
   };
@@ -350,6 +353,22 @@ describe("SpireDatabase execution state", () => {
       database.saveExecutionPlan(planFixture({ revision: -1 })),
     ).toThrowError();
     expect(database.getExecutionPlan("run-1")).toBeUndefined();
+
+    // A corrupt row written behind the schema's back must fail on read too.
+    const raw = new Database(databaseFile);
+    raw
+      .prepare(
+        `INSERT INTO execution_plans (run_id, revision, updated_at, json)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(
+        "run-corrupt",
+        -1,
+        new Date().toISOString(),
+        JSON.stringify(planFixture({ runId: "run-corrupt", revision: -1 })),
+      );
+    raw.close();
+    expect(() => database.getExecutionPlan("run-corrupt")).toThrowError();
   });
 
   it("round-trips node executions in stable node order", () => {

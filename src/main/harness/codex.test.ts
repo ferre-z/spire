@@ -285,6 +285,21 @@ describe("CodexAdapter run", () => {
     });
   });
 
+  it("translates file_change items into tool results", async () => {
+    const adapter = new CodexAdapter({ dataDir: DATA_DIR });
+    const input = runInput();
+    const { runPromise, proc } = await startRun(adapter, input);
+    feedFixture(proc);
+    proc.emit("exit", 0, null);
+    await runPromise;
+
+    expect(input.events).toContainEqual({
+      type: "tool_result",
+      tool: "file_change",
+      output: [{ path: "src/app.ts", kind: "update" }],
+    });
+  });
+
   it("resumes a session with codex exec resume after the parent flags", async () => {
     const adapter = new CodexAdapter({ dataDir: DATA_DIR });
     const session: HarnessSessionRef = {

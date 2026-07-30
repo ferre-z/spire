@@ -295,6 +295,17 @@ describe("graphDefinitionV2Schema", () => {
     );
   });
 
+  it("rejects duplicate group IDs", () => {
+    const invalid = structuredClone(v2Graph);
+    invalid.groups = [
+      { id: "dup", name: "First" },
+      { id: "dup", name: "Second" },
+    ];
+    expect(() => graphDefinitionV2Schema.parse(invalid)).toThrow(
+      "Duplicate group id",
+    );
+  });
+
   it("rejects invalid group references", () => {
     const badNodeGroup = structuredClone(v2Graph);
     badNodeGroup.nodes = [{ ...v2Agent, groupId: "missing" }];

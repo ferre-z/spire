@@ -10,7 +10,7 @@ import type {
   HarnessRunInput,
   HarnessRunResult,
   HarnessSessionRef,
-  HarnessStatus,
+  HarnessProbeStatus,
 } from "../../shared/harness";
 import {
   createJsonlParser,
@@ -179,7 +179,7 @@ export class CodexAdapter implements HarnessAdapter {
     this.killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
   }
 
-  async probe(): Promise<HarnessStatus> {
+  async probe(): Promise<HarnessProbeStatus> {
     try {
       const { stdout: whichOutput } = await exec("which", [BINARY]);
       this.binaryPath = whichOutput.trim();

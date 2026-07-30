@@ -8,7 +8,7 @@ import type {
   HarnessRunInput,
   HarnessRunResult,
   HarnessSessionRef,
-  HarnessStatus,
+  HarnessProbeStatus,
 } from "../../shared/harness";
 import {
   createJsonlParser,
@@ -180,7 +180,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  async probe(): Promise<HarnessStatus> {
+  async probe(): Promise<HarnessProbeStatus> {
     try {
       const { stdout: whichOutput } = await exec("which", [BINARY]);
       this.binaryPath = whichOutput.trim();

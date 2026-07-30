@@ -19,6 +19,22 @@ export const harnessSessionRefSchema = z.strictObject({
 }) satisfies z.ZodType<HarnessSessionRef>;
 
 /**
+ * Node-scoped harness session: which harness conversation a node of a run is
+ * currently bound to, so the run can resume it after a restart. Persisted by
+ * the main-process database; `directory` matches HarnessSessionRef so a
+ * stored row is sufficient to resume.
+ */
+export const harnessSessionSchema = z.strictObject({
+  runId: z.string().min(1),
+  nodeId: z.string().min(1),
+  harnessId: harnessIdSchema,
+  sessionId: z.string().min(1),
+  directory: z.string().min(1),
+  updatedAt: z.string().datetime(),
+});
+export type HarnessSession = z.infer<typeof harnessSessionSchema>;
+
+/**
  * Normalized events every harness adapter translates its native stream into.
  * Covers the full lifecycle: session creation, model output (text/reasoning),
  * tool activity, approvals, usage, process output, and terminal conditions
@@ -74,7 +90,7 @@ export const harnessEventSchema = z.discriminatedUnion("type", [
 export type HarnessEvent = z.infer<typeof harnessEventSchema>;
 
 /** Generalizes OpenCodeStatus across harnesses. */
-export type HarnessStatus = {
+export type HarnessProbeStatus = {
   harnessId: HarnessId;
   installed: boolean;
   binaryPath?: string;
@@ -105,7 +121,7 @@ export type HarnessRunResult = {
 
 export interface HarnessAdapter {
   readonly id: HarnessId;
-  probe(): Promise<HarnessStatus>;
+  probe(): Promise<HarnessProbeStatus>;
   listModels(): Promise<ModelOption[]>;
   run(input: HarnessRunInput): Promise<HarnessRunResult>;
   abort(session: HarnessSessionRef): Promise<void>;
@@ -114,6 +130,6 @@ export interface HarnessAdapter {
 
 export interface HarnessRegistry {
   get(id: HarnessId): HarnessAdapter;
-  probeAll(): Promise<HarnessStatus[]>;
+  probeAll(): Promise<HarnessProbeStatus[]>;
   closeAll(): Promise<void>;
 }

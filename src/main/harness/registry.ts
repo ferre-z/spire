@@ -2,7 +2,7 @@ import type { HarnessId } from "../../shared/domain";
 import type {
   HarnessAdapter,
   HarnessRegistry,
-  HarnessStatus,
+  HarnessProbeStatus,
 } from "../../shared/harness";
 import { ClaudeCodeAdapter } from "./claude-code";
 import { CodexAdapter } from "./codex";
@@ -45,7 +45,7 @@ export function createHarnessRegistry(
     },
     async probeAll() {
       return Promise.all(
-        ordered.map(async (adapter): Promise<HarnessStatus> => {
+        ordered.map(async (adapter): Promise<HarnessProbeStatus> => {
           try {
             return await adapter.probe();
           } catch (error) {

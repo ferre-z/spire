@@ -1,10 +1,8 @@
 import Database from "better-sqlite3";
-import { z } from "zod";
 import { collaborationMessageSchema } from "../shared/collaboration";
 import type { CollaborationMessage } from "../shared/collaboration";
 import {
   graphDefinitionV2Schema,
-  harnessIdSchema,
   type GraphDefinition,
   type GraphDefinitionV2,
   type RunRecord,
@@ -17,25 +15,16 @@ import {
   type ExecutionPlan,
   type NodeExecution,
 } from "../shared/execution";
+import {
+  harnessSessionSchema,
+  type HarnessSession,
+} from "../shared/harness";
 import type {
   WorkspaceLayoutMode,
   WorkspaceLayoutRecord,
 } from "../shared/workspace";
 import { readGraphDefinition } from "./graph-migration";
 import { TraceJournal, type TraceJournalOptions } from "./trace-journal";
-
-/**
- * Node-scoped harness session: which harness conversation a node of a run is
- * currently bound to, so the run can resume it after a restart.
- */
-export const harnessSessionSchema = z.strictObject({
-  runId: z.string().min(1),
-  nodeId: z.string().min(1),
-  harnessId: harnessIdSchema,
-  sessionId: z.string().min(1),
-  updatedAt: z.string().datetime(),
-});
-export type HarnessSession = z.infer<typeof harnessSessionSchema>;
 
 type SettingRow = { value: string };
 type JsonRow = { json: string };
@@ -110,6 +99,7 @@ export class SpireDatabase {
       CREATE TABLE IF NOT EXISTS harness_sessions (
         run_id TEXT NOT NULL,
         node_id TEXT NOT NULL,
+        directory TEXT NOT NULL,
         json TEXT NOT NULL,
         PRIMARY KEY (run_id, node_id)
       );
@@ -404,10 +394,18 @@ export class SpireDatabase {
     const validated = harnessSessionSchema.parse(session);
     this.db
       .prepare(
-        `INSERT INTO harness_sessions (run_id, node_id, json) VALUES (?, ?, ?)
-         ON CONFLICT(run_id, node_id) DO UPDATE SET json = excluded.json`,
+        `INSERT INTO harness_sessions (run_id, node_id, directory, json)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(run_id, node_id) DO UPDATE SET
+           directory = excluded.directory,
+           json = excluded.json`,
       )
-      .run(validated.runId, validated.nodeId, JSON.stringify(validated));
+      .run(
+        validated.runId,
+        validated.nodeId,
+        validated.directory,
+        JSON.stringify(validated),
+      );
   }
 
   getHarnessSession(runId: string, nodeId: string): HarnessSession | undefined {

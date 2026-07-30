@@ -169,7 +169,8 @@ describe("collaborationMessageSchema", () => {
     expect(() =>
       collaborationMessageSchema.parse({ ...persisted, edited: true }),
     ).toThrow();
-    const { createdAt: _omitted, ...missingTimestamp } = persisted;
+    const { createdAt: omitted, ...missingTimestamp } = persisted;
+    expect(omitted).toBe(persisted.createdAt);
     expect(() =>
       collaborationMessageSchema.parse(missingTimestamp),
     ).toThrow();

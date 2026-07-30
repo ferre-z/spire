@@ -16,7 +16,7 @@ import type {
   HarnessRunInput,
   HarnessRunResult,
   HarnessSessionRef,
-  HarnessStatus,
+  HarnessProbeStatus,
 } from "../../shared/harness";
 import { parseModelJson } from "./adapter";
 import { jsonOnly } from "../prompts";
@@ -185,7 +185,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
   private authorization?: string;
   private connected = false;
 
-  async probe(): Promise<HarnessStatus> {
+  async probe(): Promise<HarnessProbeStatus> {
     try {
       const { stdout: whichOutput } = await exec("which", ["opencode"]);
       this.binaryPath = whichOutput.trim();
@@ -237,18 +237,17 @@ export class OpenCodeAdapter implements HarnessAdapter {
   }
 
   async run(input: HarnessRunInput): Promise<HarnessRunResult> {
-    let session: HarnessSessionRef | undefined;
-    const { text } = await this.runPrompt({
+    const { sessionId, text } = await this.runPrompt({
       directory: input.directory,
       sessionId: input.session?.sessionId,
       title: `${input.nodeId} (${input.runId})`,
       model: input.modelId,
       prompt: composeRunPrompt(input),
       readOnly: input.access.mode === "read-only",
-      onSession: (sessionId) => {
-        session = {
+      onSession: (createdSessionId) => {
+        const session: HarnessSessionRef = {
           harnessId: this.id,
-          sessionId,
+          sessionId: createdSessionId,
           directory: input.directory,
         };
         input.onSession(session);
@@ -261,7 +260,12 @@ export class OpenCodeAdapter implements HarnessAdapter {
       },
     });
     const parsed = parseModelJson(text);
-    return { session: session!, output: parsed === undefined ? text : parsed };
+    const session: HarnessSessionRef = {
+      harnessId: this.id,
+      sessionId,
+      directory: input.directory,
+    };
+    return { session, output: parsed === undefined ? text : parsed };
   }
 
   async runPrompt(
