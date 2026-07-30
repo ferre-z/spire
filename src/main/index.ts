@@ -121,18 +121,20 @@ void app.whenReady().then(() => {
   }
   harness = new OpenCodeHarness();
   const backend = new LocalWorktreeBackend(path.join(dataRoot, "worktrees"));
+  const journal = database.createTraceJournal();
   const engine = new RunEngine(
     database,
     harness,
     backend,
     (event) => sendRunEvent(mainWindow, event),
+    journal,
   );
   const control = new SpireControl({
     database,
     engine,
     harness,
     backend,
-    journal: database.createTraceJournal(),
+    journal,
     environment: { appVersion: app.getVersion(), ...detectEnvironment() },
   });
   registerIpc(control, () => mainWindow);
