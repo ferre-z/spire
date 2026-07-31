@@ -12,6 +12,7 @@ import {
   executionPlanSchema,
   nodeExecutionSchema,
   type AppliedPlanPatch,
+  type CollaborationMessageDraft,
   type ExecutionPlan,
   type NodeExecution,
 } from "../shared/execution";
@@ -380,19 +381,45 @@ export class SpireDatabase {
     })();
   }
 
-  appendCollaborationMessage(message: CollaborationMessage): void {
-    const validated = collaborationMessageSchema.parse(message);
-    this.db
-      .prepare(
-        `INSERT INTO collaboration_messages (run_id, sequence, created_at, json)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(
-        validated.runId,
-        validated.sequence,
-        validated.createdAt,
-        JSON.stringify(validated),
-      );
+  /**
+   * Persist a collaboration message atomically: the next sequence number
+   * (max existing sequence for the run + 1) and the INSERT happen in a single
+   * transaction, so concurrent callers — the scheduler's per-run delivery
+   * batch and a control-plane send — can never read the same length and collide
+   * on the (run_id, sequence) primary key. Callers must not pre-allocate the
+   * sequence; the returned message carries the canonical id (`<runId>:<seq>`)
+   * and timestamp, which the workspace filenames are derived from.
+   */
+  appendCollaborationMessage(
+    runId: string,
+    draft: CollaborationMessageDraft,
+    senderNodeId: string,
+  ): CollaborationMessage {
+    return this.db.transaction(() => {
+      const row = this.db
+        .prepare(
+          "SELECT max(sequence) AS seq FROM collaboration_messages WHERE run_id = ?",
+        )
+        .get(runId) as { seq: number | null } | undefined;
+      const sequence = (row?.seq ?? -1) + 1;
+      const createdAt = new Date().toISOString();
+      const message: CollaborationMessage = {
+        ...draft,
+        id: `${runId}:${sequence}`,
+        runId,
+        senderNodeId,
+        sequence,
+        createdAt,
+      };
+      const validated = collaborationMessageSchema.parse(message);
+      this.db
+        .prepare(
+          `INSERT INTO collaboration_messages (run_id, sequence, created_at, json)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(runId, sequence, createdAt, JSON.stringify(validated));
+      return validated;
+    })();
   }
 
   listCollaborationMessages(runId: string): CollaborationMessage[] {

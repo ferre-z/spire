@@ -238,8 +238,10 @@ export class RunEngine {
 
   /**
    * Deliver a collaboration message: persist it with the next sequence
-   * number, then deliver it to the run's collaboration workspace if one
-   * exists. Returns the fully-formed persisted message.
+   * number, then deliver it to the run's collaboration workspace if one exists.
+   * Returns the fully-formed persisted message. Sequence allocation is owned by
+   * the database so this control-plane send cannot collide with a scheduler
+   * batch delivering to the same run.
    */
   async deliverMessage(
     runId: string,
@@ -247,16 +249,11 @@ export class RunEngine {
     senderNodeId: string,
   ): Promise<CollaborationMessage> {
     this.requireRun(runId);
-    const sequence = this.database.listCollaborationMessages(runId).length;
-    const message: CollaborationMessage = {
-      ...draft,
-      id: `${runId}:${sequence}`,
+    const message = this.database.appendCollaborationMessage(
       runId,
+      draft,
       senderNodeId,
-      sequence,
-      createdAt: new Date().toISOString(),
-    };
-    this.database.appendCollaborationMessage(message);
+    );
     const workspace = this.collaborationWorkspaces.get(runId);
     if (workspace) {
       await workspace.deliver(message);

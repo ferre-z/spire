@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CollaborationMessage } from "../shared/collaboration";
 import type { GraphDefinition } from "../shared/domain";
 import type {
   AppliedPlanPatch,
+  CollaborationMessageDraft,
   ExecutionPlan,
   NodeExecution,
 } from "../shared/execution";
@@ -237,15 +237,10 @@ function planFixture(overrides: Partial<ExecutionPlan> = {}): ExecutionPlan {
   };
 }
 
-function messageFixture(
-  overrides: Partial<CollaborationMessage> = {},
-): CollaborationMessage {
+function messageDraft(
+  overrides: Partial<CollaborationMessageDraft> = {},
+): CollaborationMessageDraft {
   return {
-    id: "msg-1",
-    runId: "run-1",
-    senderNodeId: "planner",
-    sequence: 0,
-    createdAt: "2026-07-30T10:01:00.000Z",
     recipient: { kind: "node", id: "implementer" },
     kind: "handoff",
     subject: "Brief ready",
@@ -424,20 +419,66 @@ describe("SpireDatabase execution state", () => {
   });
 
   it("round-trips collaboration messages ordered by sequence", () => {
-    database.appendCollaborationMessage(
-      messageFixture({
-        id: "msg-2",
-        sequence: 1,
+    const first = database.appendCollaborationMessage(
+      "run-1",
+      messageDraft(),
+      "planner",
+    );
+    const second = database.appendCollaborationMessage(
+      "run-1",
+      messageDraft({
         recipient: { kind: "successors" },
         kind: "report",
         subject: "Done",
       }),
+      "implementer",
     );
-    database.appendCollaborationMessage(messageFixture());
     const messages = database.listCollaborationMessages("run-1");
-    expect(messages.map((message) => message.id)).toEqual(["msg-1", "msg-2"]);
-    expect(messages[0]).toEqual(messageFixture());
+    expect(messages).toEqual([first, second]);
+    expect(messages.map((message) => message.sequence)).toEqual([0, 1]);
+    expect(messages.map((message) => message.id)).toEqual(["run-1:0", "run-1:1"]);
+    expect(messages[0]).toMatchObject({
+      runId: "run-1",
+      senderNodeId: "planner",
+      subject: "Brief ready",
+      recipient: messageDraft().recipient,
+    });
     expect(database.listCollaborationMessages("run-other")).toEqual([]);
+  });
+
+  it("allocates unique, monotonic sequences across concurrent sends (no pre-allocation)", async () => {
+    // Reproduces the cross-plane race: a scheduler per-run delivery batch and a
+    // control-plane send both append to one run. Each send yields once (the
+    // scheduler awaits between drafts; the control plane awaits its workspace
+    // deliver) before calling the DB, so sequence allocation must be owned by
+    // the DB transaction — not pre-allocated from list().length — or two callers
+    // read the same length and collide on the (run_id, sequence) primary key.
+    const draft = (subject: string) => ({
+      recipient: { kind: "successors" } as const,
+      kind: "report" as const,
+      subject,
+      body: "",
+      artifactPaths: [] as string[],
+    });
+    const sent: number[] = [];
+    const send = async (subject: string) => {
+      await Promise.resolve();
+      const message = database.appendCollaborationMessage(
+        "run-1",
+        draft(subject),
+        "planner",
+      );
+      sent.push(message.sequence);
+    };
+    await Promise.all([send("a"), send("b"), send("c")]);
+    expect(sent.sort((x, y) => x - y)).toEqual([0, 1, 2]);
+    const persisted = database.listCollaborationMessages("run-1");
+    expect(persisted.map((message) => message.sequence)).toEqual([0, 1, 2]);
+    expect(persisted.map((message) => message.id)).toEqual([
+      "run-1:0",
+      "run-1:1",
+      "run-1:2",
+    ]);
   });
 
   it("round-trips applied plan patches ordered by revision", () => {
@@ -516,7 +557,7 @@ describe("SpireDatabase execution state", () => {
       status: "succeeded",
       visits: 1,
     });
-    database.appendCollaborationMessage(messageFixture());
+    database.appendCollaborationMessage("run-1", messageDraft(), "planner");
     database.savePlanPatch("run-1", patchFixture());
     database.saveHarnessSession(sessionFixture());
     database.close();
@@ -527,7 +568,14 @@ describe("SpireDatabase execution state", () => {
       { nodeId: "planner", status: "succeeded", visits: 1 },
     ]);
     expect(database.listCollaborationMessages("run-1")).toEqual([
-      messageFixture(),
+      expect.objectContaining({
+        runId: "run-1",
+        senderNodeId: "planner",
+        sequence: 0,
+        subject: "Brief ready",
+        kind: "handoff",
+        recipient: { kind: "node", id: "implementer" },
+      }),
     ]);
     expect(database.listPlanPatches("run-1")).toEqual([patchFixture()]);
     expect(database.getHarnessSession("run-1", "implementer")).toEqual(

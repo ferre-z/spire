@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { CollaborationMessage } from "../../shared/collaboration";
 import type {
   AgentNode,
   CheckpointNode,
@@ -722,19 +721,17 @@ export class GraphScheduler {
     node: CompiledNode,
     drafts: CollaborationMessageDraft[],
   ): Promise<void> {
-    let sequence = this.database.listCollaborationMessages(plan.runId).length;
+    // Sequence allocation lives in the database (max+1 per insert, in one
+    // transaction) so a control-plane send can never collide with this batch's
+    // sequences. The per-run deliveryQueue still serializes the workspace
+    // writes; the returned message (with its DB-assigned sequence) drives them.
     for (const draft of drafts) {
-      const message: CollaborationMessage = {
-        ...draft,
-        id: `${plan.runId}:${sequence}`,
-        runId: plan.runId,
-        senderNodeId: node.id,
-        sequence,
-        createdAt: new Date().toISOString(),
-      };
-      this.database.appendCollaborationMessage(message);
+      const message = this.database.appendCollaborationMessage(
+        plan.runId,
+        draft,
+        node.id,
+      );
       await this.collaboration?.deliver(message);
-      sequence += 1;
     }
   }
 
