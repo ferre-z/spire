@@ -1,6 +1,8 @@
 import path from "node:path";
-import { mkdtemp } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphDefinition } from "../shared/domain";
 import type { NodeOutcome } from "../shared/execution";
@@ -15,7 +17,13 @@ import { SpireDatabase } from "./database";
 import { createHarnessRegistry } from "./harness/registry";
 import { RunEngine } from "./run-engine";
 import { REDACTED, type TraceJournal } from "./trace-journal";
-import type { ExecutionBackend, PreparedWorkspace } from "./worktree";
+import {
+  LocalWorktreeBackend,
+  type ExecutionBackend,
+  type PreparedWorkspace,
+} from "./worktree";
+
+const exec = promisify(execFile);
 
 function ok(summary = "done"): NodeOutcome {
   return {
@@ -44,6 +52,7 @@ class FakeAdapter implements HarnessAdapter {
   constructor(
     private readonly outputs: unknown[] = [],
     private readonly hang = false,
+    private readonly sideEffect?: (input: HarnessRunInput) => Promise<void> | void,
   ) {}
 
   async probe(): Promise<HarnessProbeStatus> {
@@ -69,7 +78,10 @@ class FakeAdapter implements HarnessAdapter {
     input.onEvent({ type: "tool_result", tool: "fake", output: "done" });
     const output = this.outputs[this.index] ?? ok(`output-${this.index}`);
     this.index += 1;
-    return Promise.resolve({ session: ref, output });
+    return Promise.resolve(this.sideEffect?.(input)).then(() => ({
+      session: ref,
+      output,
+    }));
   }
   async abort(session: HarnessSessionRef): Promise<void> {
     this.abortCalls.push(session);
@@ -520,6 +532,94 @@ describe("RunEngine trace journaling", () => {
     );
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+    database.close();
+  });
+
+  it("wires collaboration inboxes and node worktree isolation into real runs", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spire-engine-git-"));
+    const repository = path.join(root, "repository");
+    await mkdir(repository);
+    await exec("git", ["init", "-b", "main"], { cwd: repository });
+    await exec("git", ["config", "user.email", "spire@example.test"], {
+      cwd: repository,
+    });
+    await exec("git", ["config", "user.name", "Spire Test"], { cwd: repository });
+    await writeFile(path.join(repository, "README.md"), "# Fixture\n");
+    await exec("git", ["add", "."], { cwd: repository });
+    await exec("git", ["commit", "-m", "fixture"], { cwd: repository });
+    const userDataDir = path.join(root, "user-data");
+
+    const database = new SpireDatabase(":memory:");
+    const adapter = new FakeAdapter(
+      [
+        {
+          ...select(["a"], "brief written"),
+          messages: [
+            {
+              recipient: { kind: "successors" },
+              kind: "handoff",
+              subject: "Brief ready",
+              body: "Implement the brief.",
+              artifactPaths: [],
+            },
+          ],
+        },
+        ok("built"),
+        ok("accepted"),
+      ],
+      false,
+      async (input) => {
+        if (input.nodeId !== "implementer") return;
+        await mkdir(path.join(input.directory, "src"), { recursive: true });
+        await writeFile(
+          path.join(input.directory, "src", "value.ts"),
+          "export const value = 1;\n",
+        );
+      },
+    );
+    const engine = new RunEngine(
+      database,
+      createHarnessRegistry([adapter]),
+      new LocalWorktreeBackend(path.join(userDataDir, "worktrees")),
+      () => undefined,
+      undefined,
+      userDataDir,
+    );
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: repository,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 5000 },
+    );
+
+    const saved = database.getRun(run.id)!;
+    // Node workspace isolation: the workspace-write implementer ran in a
+    // private node worktree (not the integration worktree), and its
+    // committed work merged into the integration branch at the final sweep.
+    const implementerCall = adapter.calls.find(
+      (call) => call.nodeId === "implementer",
+    )!;
+    expect(implementerCall.directory).toContain("node-worktrees");
+    expect(implementerCall.directory).not.toBe(saved.artifacts!.worktreePath);
+    expect(saved.artifacts!.changedFiles).toEqual(["src/value.ts"]);
+    // Collaboration: agent contexts are assembled Markdown packets, and the
+    // planner's handoff landed in the implementer's userData inbox.
+    expect(adapter.calls[0].context).toContain("# Context for");
+    const inbox = await readFile(
+      path.join(
+        userDataDir,
+        "runs",
+        run.id,
+        "collaboration",
+        "inbox",
+        "implementer.md",
+      ),
+      "utf8",
+    );
+    expect(inbox).toContain("Brief ready");
     database.close();
   });
 });

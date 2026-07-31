@@ -23,8 +23,10 @@ const exec = promisify(execFile);
  * eligible for failure routing — and the integration worktree is left clean.
  *
  * Node worktrees and branches live under the coordinator's `rootDir` and the
- * `spire/run-<id>/node-*` branch namespace; both are removed after merge or
- * discard so the source repository is left exactly as the run found it.
+ * `spire/node/<run>/` branch namespace (deliberately NOT nested under the
+ * integration branch `spire/run-<id>` — git refuses a ref below another
+ * branch's ref); both are removed after merge or discard so the source
+ * repository is left exactly as the run found it.
  */
 
 export type NodeAccess = AgentNode["access"];
@@ -156,7 +158,7 @@ export class NodeWorkspaceCoordinator {
         await this.discardNodeInner(input.nodeId);
       }
       const safe = safeSegment(input.nodeId);
-      const branch = `spire/run-${this.shortRunId}/node-${safe}-v${input.visit}`;
+      const branch = `spire/node/${this.shortRunId}/${safe}-v${input.visit}`;
       const directory = path.join(
         this.options.rootDir,
         `${safe}-v${input.visit}`,

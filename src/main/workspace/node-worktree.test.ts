@@ -72,7 +72,7 @@ async function nodeBranches(repository: string): Promise<string[]> {
   const out = await git(repository, [
     "branch",
     "--list",
-    "spire/run-testrun/node-*",
+    "spire/node/testrunid1/*",
     "--format=%(refname:short)",
   ]);
   return out ? out.split("\n") : [];

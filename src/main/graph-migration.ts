@@ -99,7 +99,7 @@ export function migrateLegacyGraph(
     activation: "any" as const,
     access:
       node.role === "implementer"
-        ? { mode: "workspace-write" as const, writeScopes: ["**/*"] }
+        ? { mode: "workspace-write" as const, writeScopes: ["."] }
         : { mode: "read-only" as const, writeScopes: [] },
     position: { x: node.position.x, y: node.position.y },
   }));

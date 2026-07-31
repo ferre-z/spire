@@ -125,7 +125,7 @@ describe("migrateLegacyGraph", () => {
     });
     expect(agentNode(migrated, "implementer").access).toEqual({
       mode: "workspace-write",
-      writeScopes: ["**/*"],
+      writeScopes: ["."],
     });
   });
 

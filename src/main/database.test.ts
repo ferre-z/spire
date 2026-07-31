@@ -534,4 +534,88 @@ describe("SpireDatabase execution state", () => {
       sessionFixture(),
     );
   });
+
+  it("keeps the first write of every plan revision as its snapshot", () => {
+    database.saveExecutionPlan(planFixture({ revision: 0, patches: [] }));
+    // Later writes at the same revision do not replace the snapshot.
+    database.saveExecutionPlan(planFixture({ revision: 0, patches: [] }));
+    database.saveExecutionPlan(planFixture({ revision: 1, stepCount: 9 }));
+    database.saveExecutionPlan(planFixture({ revision: 1, stepCount: 10 }));
+
+    expect(database.getExecutionPlanRevision("run-1", 0)?.revision).toBe(0);
+    expect(database.getExecutionPlanRevision("run-1", 0)?.patches).toEqual([]);
+    // First write wins: the revision-1 snapshot has stepCount 9, not 10.
+    expect(database.getExecutionPlanRevision("run-1", 1)?.stepCount).toBe(9);
+    expect(database.getExecutionPlanRevision("run-1", 2)).toBeUndefined();
+    expect(
+      database.getExecutionPlanRevision("run-other", 0),
+    ).toBeUndefined();
+    // The live plan still tracks the latest write.
+    expect(database.getExecutionPlan("run-1")?.stepCount).toBe(10);
+  });
+
+  it("persists a patched plan, its audit row, and node changes atomically", () => {
+    database.saveExecutionPlan(planFixture({ revision: 0, patches: [] }));
+    database.saveNodeExecution("run-1", {
+      nodeId: "planner",
+      status: "succeeded",
+      visits: 1,
+    });
+    database.saveNodeExecution("run-1", {
+      nodeId: "implementer",
+      status: "waiting",
+      visits: 0,
+    });
+
+    const patched = planFixture({
+      revision: 1,
+      nodes: [{ nodeId: "planner", status: "succeeded", visits: 1 }],
+    });
+    database.savePatchedPlan(patched, patchFixture(), {
+      removedNodeIds: ["implementer"],
+      changedNodes: [{ nodeId: "planner", status: "succeeded", visits: 1 }],
+    });
+
+    expect(database.getExecutionPlan("run-1")).toEqual(patched);
+    expect(database.listPlanPatches("run-1")).toEqual([patchFixture()]);
+    // The dropped node's row is gone; the changed node's row is current.
+    expect(database.listNodeExecutions("run-1")).toEqual([
+      { nodeId: "planner", status: "succeeded", visits: 1 },
+    ]);
+    // The patch revision's snapshot is the post-patch state.
+    expect(database.getExecutionPlanRevision("run-1", 1)).toEqual(patched);
+  });
+
+  it("marks the rolled-back patch inside the rollback transaction", () => {
+    database.saveExecutionPlan(planFixture({ revision: 0, patches: [] }));
+    database.savePatchedPlan(planFixture(), patchFixture());
+
+    const rollback = patchFixture({
+      id: "patch-2",
+      baseRevision: 1,
+      appliedRevision: 2,
+      appliedAt: "2026-07-30T10:06:00.000Z",
+      reason: "Rollback of patch-1.",
+      operations: [{ action: "retry", nodeId: "planner" }],
+    });
+    database.savePatchedPlan(planFixture({ revision: 2 }), rollback, {
+      rolledBackPatchId: "patch-1",
+    });
+
+    const patches = database.listPlanPatches("run-1");
+    expect(patches).toHaveLength(2);
+    expect(patches[0].rolledBackBy).toBe("patch-2");
+    expect(patches[1]).toEqual(rollback);
+  });
+
+  it("rolls back every write when a patched-plan write fails", () => {
+    const original = planFixture({ revision: 0, patches: [] });
+    database.saveExecutionPlan(original);
+    const invalidPatch = { ...patchFixture(), appliedRevision: 0 };
+    expect(() =>
+      database.savePatchedPlan(planFixture(), invalidPatch),
+    ).toThrowError();
+    expect(database.getExecutionPlan("run-1")).toEqual(original);
+    expect(database.listPlanPatches("run-1")).toEqual([]);
+  });
 });

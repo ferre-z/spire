@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import type {
   GraphDefinitionV2,
   RunEvent,
@@ -9,6 +10,7 @@ import type {
 import type { ExecutionPlan, NodeExecution } from "../shared/execution";
 import type { HarnessEvent, HarnessRegistry } from "../shared/harness";
 import type { JsonValue } from "../shared/workspace";
+import { CollaborationWorkspace } from "./collaboration/workspace";
 import type { SpireDatabase } from "./database";
 import { migrateLegacyGraph } from "./graph-migration";
 import {
@@ -24,6 +26,7 @@ import {
   type SchedulerObserver,
 } from "./scheduler/scheduler";
 import type { TraceJournal } from "./trace-journal";
+import { NodeWorkspaceCoordinator } from "./workspace/node-worktree";
 import type { ExecutionBackend } from "./worktree";
 
 /** Maximum number of RunEvents kept in a RunRecord's events array. */
@@ -90,6 +93,8 @@ export class RunEngine {
   private schedulers = new Map<string, GraphScheduler>();
   /** The live run objects mutated by in-flight executions, keyed by run id. */
   private live = new Map<string, RunRecord>();
+  /** Per-run node workspace coordinators, keyed by run id. */
+  private runWorkspaces = new Map<string, NodeWorkspaceCoordinator>();
 
   constructor(
     private readonly database: SpireDatabase,
@@ -97,6 +102,12 @@ export class RunEngine {
     private readonly backend: ExecutionBackend,
     private readonly notify: (event: RunEvent) => void,
     private readonly journal?: TraceJournal,
+    /**
+     * Electron userData root. When set, real runs get the collaboration
+     * workspace (runs/<runId>/collaboration) and per-node worktree isolation
+     * (runs/<runId>/node-worktrees); tests omit it to run dep-free.
+     */
+    private readonly userDataDir?: string,
   ) {
     const active = database
       .listRuns()
@@ -118,6 +129,7 @@ export class RunEngine {
     this.live.set(active.id, active);
     void this.resumePlan(active, plan).finally(() => {
       this.live.delete(active.id);
+      this.runWorkspaces.delete(active.id);
       if (this.activeRunId === active.id) this.activeRunId = undefined;
     });
   }
@@ -150,6 +162,7 @@ export class RunEngine {
     this.live.set(id, run);
     void this.execute(run, graph, plan).finally(() => {
       this.live.delete(id);
+      this.runWorkspaces.delete(id);
       if (this.activeRunId === id) this.activeRunId = undefined;
     });
     return run;
@@ -181,6 +194,7 @@ export class RunEngine {
     this.live.set(runId, run);
     void this.retryPlan(run).finally(() => {
       this.live.delete(runId);
+      this.runWorkspaces.delete(runId);
       if (this.activeRunId === runId) this.activeRunId = undefined;
     });
     return run;
@@ -215,7 +229,7 @@ export class RunEngine {
         );
       }
       const compiled = compileGraph(graph, this.subgraphResolver());
-      const scheduler = this.createScheduler(run);
+      const scheduler = this.createScheduler(run, compiled);
       const final = await scheduler.start(compiled, plan);
       await this.finishFromPlan(run, final);
     } catch (error) {
@@ -227,7 +241,7 @@ export class RunEngine {
   private async resumePlan(run: RunRecord, plan: ExecutionPlan): Promise<void> {
     try {
       const compiled = this.compileFor(plan);
-      const scheduler = this.createScheduler(run);
+      const scheduler = this.createScheduler(run, compiled);
       const final = await scheduler.resume(compiled, plan);
       await this.finishFromPlan(run, final);
     } catch (error) {
@@ -247,7 +261,7 @@ export class RunEngine {
         this.database.saveExecutionPlan(plan);
       }
       const compiled = this.compileFor(plan);
-      const scheduler = this.createScheduler(run);
+      const scheduler = this.createScheduler(run, compiled);
       const final = await scheduler.resume(compiled, plan, options);
       await this.finishFromPlan(run, final);
     } catch (error) {
@@ -262,11 +276,33 @@ export class RunEngine {
     if (run.status === "stopped") return;
     switch (plan.status) {
       case "succeeded": {
-        const inspection = await this.backend.inspect(
-          run.artifacts!.worktreePath,
-        );
-        run.artifacts!.diff = inspection.diff;
-        run.artifacts!.changedFiles = inspection.changedFiles;
+        // With node workspace isolation, committed node branches merge into
+        // the integration branch at checkpoints; sweep any work committed
+        // after the last checkpoint before computing the run diff.
+        const workspaces = this.runWorkspaces.get(run.id);
+        if (workspaces) {
+          const merge = await workspaces.mergeAtCheckpoint();
+          if (merge.conflicts.length > 0) {
+            this.journalEvent({
+              runId: run.id,
+              kind: "run.warning",
+              level: "warn",
+              message:
+                `Final merge dropped conflicting node work: ${merge.conflicts
+                  .map((conflict) => conflict.nodeId)
+                  .join(", ")}.`,
+            });
+          }
+          const final = await workspaces.finalDiff();
+          run.artifacts!.diff = final.diff;
+          run.artifacts!.changedFiles = final.changedFiles;
+        } else {
+          const inspection = await this.backend.inspect(
+            run.artifacts!.worktreePath,
+          );
+          run.artifacts!.diff = inspection.diff;
+          run.artifacts!.changedFiles = inspection.changedFiles;
+        }
         this.transition(run, "succeeded", "All graph work completed.");
         run.finishedAt = new Date().toISOString();
         this.database.saveRun(run);
@@ -358,13 +394,50 @@ export class RunEngine {
     };
   }
 
-  private createScheduler(run: RunRecord): GraphScheduler {
+  private createScheduler(run: RunRecord, compiled: CompiledGraph): GraphScheduler {
+    // Production runs get the collaboration workspace and per-node worktree
+    // isolation; both are rooted under userData so nothing lands in the
+    // repository's git status.
+    const collaboration = this.userDataDir
+      ? new CollaborationWorkspace({
+          userDataDir: this.userDataDir,
+          runId: run.id,
+          goal: run.goal,
+          nodes: compiled.nodes.map((node) => ({
+            id: node.id,
+            name: node.name,
+            groupId: node.groupId,
+          })),
+          edges: compiled.edges.map((edge) => ({
+            source: edge.source,
+            target: edge.target,
+          })),
+        })
+      : undefined;
+    let workspaces: NodeWorkspaceCoordinator | undefined;
+    if (this.userDataDir && run.artifacts?.worktreePath) {
+      workspaces = new NodeWorkspaceCoordinator({
+        repositoryPath: run.repositoryPath,
+        integrationPath: run.artifacts.worktreePath,
+        integrationBranch: run.artifacts.branch,
+        runId: run.id,
+        rootDir: path.join(
+          this.userDataDir,
+          "runs",
+          run.id,
+          "node-worktrees",
+        ),
+      });
+      this.runWorkspaces.set(run.id, workspaces);
+    }
     const scheduler = new GraphScheduler({
       database: this.database,
       registry: this.registry,
       goal: run.goal,
       directory: run.artifacts!.worktreePath,
       observer: this.observerFor(run),
+      collaboration,
+      workspaces,
     });
     this.schedulers.set(run.id, scheduler);
     return scheduler;

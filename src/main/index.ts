@@ -130,6 +130,7 @@ void app.whenReady().then(() => {
     backend,
     (event) => sendRunEvent(mainWindow, event),
     journal,
+    dataRoot,
   );
   const control = new SpireControl({
     database,
