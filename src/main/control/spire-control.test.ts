@@ -5,16 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   GraphDefinition,
   GraphDefinitionV2,
-  GraphNode,
   PlanMutation,
   RunRecord,
 } from "../../shared/domain";
 import { CONTROL_OPERATION_NAMES } from "../../shared/control";
 import type {
-  AppliedPlanPatch,
-  CollaborationMessageDraft,
-  ExecutionPlan,
-  NodeExecution,
   PlanPatchDraft,
 } from "../../shared/execution";
 import type { TraceEvent } from "../../shared/trace";
@@ -1364,7 +1359,6 @@ describe("runs.plan.patch", () => {
       () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
       { timeout: 3000 },
     );
-    const plan = database.getExecutionPlan(run.id)!;
     const draft: PlanPatchDraft = {
       baseRevision: 999,
       reason: "stale",

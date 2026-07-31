@@ -15,13 +15,10 @@ import { IPC } from "../shared/api";
 import type { ControlOperationName } from "../shared/control";
 import type {
   GraphDefinition,
-  GraphDefinitionV2,
   OpenCodeStatus,
   RunRecord,
 } from "../shared/domain";
 import type {
-  CollaborationMessageDraft,
-  PlanPatchDraft,
 } from "../shared/execution";
 import type { TraceEvent } from "../shared/trace";
 import {

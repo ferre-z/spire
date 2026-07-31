@@ -41,10 +41,7 @@ import { graphDefinitionV2Schema } from "../../shared/domain";
 import type {
   AppliedPlanPatch,
   ExecutionPlan,
-  NodeExecution,
-  PlanPatchDraft,
 } from "../../shared/execution";
-import type { CollaborationMessage } from "../../shared/collaboration";
 import type { HarnessRegistry } from "../../shared/harness";
 import type { TraceCursor, TraceFilter, TraceListener, TracePage } from "../../shared/trace";
 import type { JsonValue, WorkspaceLayoutRecord } from "../../shared/workspace";
@@ -542,7 +539,7 @@ export class SpireControl {
   }
 
   handleRunsNodesList(input: RunScopedPageInput): NodeExecutionPage {
-    const run = this.requireRun(input.runId);
+    this.requireRun(input.runId);
     const nodes = this.deps.database.listNodeExecutions(input.runId);
     const result = page(nodes, parseCursor(input.cursor), input.limit);
     return { nodes: result.items, nextCursor: result.nextCursor };

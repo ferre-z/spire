@@ -12,7 +12,6 @@ import {
   type HarnessStatus,
   type MessagePage,
   type NodeExecutionPage,
-  type PlanPatchInput,
   type SentMessage,
   type RepositoryValidation,
   type RunPage,
@@ -28,7 +27,6 @@ import type {
 import type {
   AppliedPlanPatch,
   ExecutionPlan,
-  NodeExecution,
 } from "../shared/execution";
 import type { TracePage } from "../shared/trace";
 import type { WorkspaceLayoutRecord } from "../shared/workspace";
