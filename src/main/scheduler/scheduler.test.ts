@@ -367,6 +367,38 @@ describe("GraphScheduler", () => {
     const final = await scheduler.start(compiled, plan);
     expect(nodeIds(adapter)).toEqual(["a"]);
     expect(final.status).toBe("failed");
+    // The unrouted branch was never activated: it settles as skipped.
+    expect(final.nodes.find((node) => node.nodeId === "b")?.status).toBe(
+      "skipped",
+    );
+  });
+
+  it("settles a starved all-join as skipped without failing the plan", async () => {
+    // a fails -> b runs (failure route); j needs both a (success) and b, and
+    // a's success token never arrives: j is a no-ready-node deadlock.
+    const adapter = new FakeAdapter("opencode", [failedOutcome(), ok()]);
+    const definition = graph(
+      [agent("a"), agent("b"), agent("j")],
+      [
+        edge("ab", "a", "b", "failure"),
+        edge("aj", "a", "j", "success"),
+        edge("bj", "b", "j", "always"),
+      ],
+    );
+    const { scheduler, compiled, plan, database } = setup(definition, adapter);
+    const final = await scheduler.start(compiled, plan);
+
+    expect(nodeIds(adapter)).toEqual(["a", "b"]);
+    expect(final.status).toBe("succeeded");
+    const join = final.nodes.find((node) => node.nodeId === "j")!;
+    expect(join.status).toBe("skipped");
+    expect(join.visits).toBe(0);
+    // The skip is persisted, not just computed in memory.
+    const persisted = database
+      .listNodeExecutions("run-1")
+      .find((node) => node.nodeId === "j")!;
+    expect(persisted.status).toBe("skipped");
+    database.close();
   });
 
   it("routes selected edges only when the outcome selects them", async () => {

@@ -204,11 +204,15 @@ function layoutRecord(graphId = "graph"): WorkspaceLayoutRecord {
   };
 }
 
-function createControl(answers: string[] = [], hang = false) {
+function createControl(
+  answers: string[] = [],
+  hang = false,
+  outputs: unknown[] = [],
+) {
   const database = new SpireDatabase(":memory:");
   const journal = database.createTraceJournal();
   const harness = new FakeHarness(answers, hang);
-  const adapter = new FakeAdapter([], hang);
+  const adapter = new FakeAdapter(outputs, hang);
   const registry = createHarnessRegistry([adapter]);
   const backend = new FakeBackend();
   const engine = new RunEngine(database, registry, backend, () => undefined);
@@ -222,6 +226,10 @@ function createControl(answers: string[] = [], hang = false) {
     environment: { appVersion: "1.2.3-test", platform: "linux", isWayland: false },
   });
   return { control, database, journal, harness, adapter, registry, backend, engine };
+}
+
+function selectOutcome(edgeIds: string[], summary = "done"): NodeOutcome {
+  return { ...okOutcome(summary), selectedEdgeIds: edgeIds };
 }
 
 async function makeRepository(): Promise<string> {
@@ -607,10 +615,14 @@ describe("runs operations", () => {
     expect(stopped.finishedAt).toBeDefined();
   });
 
-  it("retries a run that exhausted its step budget until the graph quiesces", async () => {
-    // maxIterations 1 compiles to maxSteps 2; each retry resets the step
-    // budget, and the migrated legacy cycle quiesces at the visit bound.
-    const { control, database } = createControl();
+  it("retries a run that exhausted its step budget to completion", async () => {
+    // maxIterations 1 compiles to maxSteps 2: brief + build fit the budget,
+    // the review does not; a retry resets the step budget and finishes.
+    const { control, database } = createControl([], false, [
+      selectOutcome(["a"], "brief written"),
+      okOutcome("built"),
+      okOutcome("accepted"),
+    ]);
     const repositoryPath = await makeRepository();
     const run = await control.execute("runs.start", {
       graph: graph("graph", 1, 1),
@@ -625,12 +637,6 @@ describe("runs operations", () => {
 
     const retried = await control.execute("runs.retry", { runId: run.id });
     expect(retried.id).toBe(run.id);
-    await vi.waitFor(
-      () =>
-        expect(database.getRun(run.id)?.status).toBe("needs_attention"),
-      { timeout: 3000 },
-    );
-    await control.execute("runs.retry", { runId: run.id });
     await vi.waitFor(
       () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
       { timeout: 3000 },

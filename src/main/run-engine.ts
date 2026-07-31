@@ -372,7 +372,8 @@ export class RunEngine {
 
   private observerFor(run: RunRecord): SchedulerObserver {
     return {
-      nodeStarted: (node, visit) => this.markNodeStart(run, node, visit),
+      nodeStarted: (node, visit, context) =>
+        this.markNodeStart(run, node, visit, context),
       nodeFinished: (node, execution) =>
         this.markNodeFinish(run, node, execution),
       harnessEvent: (nodeId, event) => {
@@ -405,6 +406,7 @@ export class RunEngine {
     run: RunRecord,
     node: CompiledNode,
     visit: number,
+    context: string,
   ): void {
     const roleLabel =
       node.kind === "agent" || node.kind === "decision"
@@ -431,6 +433,7 @@ export class RunEngine {
         message: `${node.name} prompt sent`,
         payload: {
           job: node.job,
+          context,
           model: node.modelId,
           sessionId: stored?.sessionId,
           visit,

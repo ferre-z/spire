@@ -40,7 +40,7 @@ import type { CompiledGraph, CompiledNode } from "./graph-compiler";
 
 /** Live progress sink implemented by the run engine. */
 export type SchedulerObserver = {
-  nodeStarted(node: CompiledNode, visit: number): void;
+  nodeStarted(node: CompiledNode, visit: number, context: string): void;
   nodeFinished(node: CompiledNode, execution: NodeExecution): void;
   harnessEvent(nodeId: string, event: HarnessEvent): void;
   planUpdated(plan: ExecutionPlan): void;
@@ -226,8 +226,25 @@ export class GraphScheduler {
     }
   }
 
-  /** Terminal evaluation once no node is running and none can become ready. */
+  /**
+   * Terminal evaluation once no node is running and none can become ready.
+   * Nodes that were never activated (still `waiting`/`queued` with zero
+   * visits) are marked `skipped` first: they are branches legitimately
+   * unreached due to routing — e.g. an all-join whose other input sat on a
+   * branch that was not taken (the no-ready-node deadlock case). A plan then
+   * fails only when a node failure was never routed downstream; otherwise it
+   * succeeds.
+   */
   private settle(graph: CompiledGraph, plan: ExecutionPlan): ExecutionPlan {
+    for (const execution of plan.nodes) {
+      const neverActivated =
+        execution.visits === 0 &&
+        (execution.status === "waiting" || execution.status === "queued");
+      if (neverActivated) {
+        execution.status = "skipped";
+        this.persistNode(plan, execution);
+      }
+    }
     const unhandled = plan.nodes.filter(
       (execution) =>
         execution.status === "failed" && !this.failureHandled(graph, plan, execution),
@@ -328,6 +345,28 @@ export class GraphScheduler {
     return isAgentLike(node) ? node.maxVisits : Number.MAX_SAFE_INTEGER;
   }
 
+  /**
+   * Node prompt context: the run goal plus, when the node has outgoing
+   * `selected` edges, the explicit routing choices (edge ids + labels) the
+   * model must pick from via `selectedEdgeIds` in its NodeOutcome.
+   */
+  private nodeContext(graph: CompiledGraph, node: CompiledNode): string {
+    let context = `Run goal: ${this.goal}`;
+    const selectable = graph.edges.filter(
+      (edge) => edge.source === node.id && edge.when === "selected",
+    );
+    if (selectable.length > 0) {
+      const choices = selectable
+        .map((edge) => `"${edge.id}" (${edge.label})`)
+        .join(", ");
+      context +=
+        `\n\nRouting: to pass work to the next node, include the matching ` +
+        `edge id in your output's selectedEdgeIds: ${choices}. ` +
+        `Leave selectedEdgeIds empty when no further work is needed.`;
+    }
+    return context;
+  }
+
   // --- Node execution -------------------------------------------------------
 
   private async executeNode(
@@ -342,7 +381,8 @@ export class GraphScheduler {
     execution.error = undefined;
     plan.stepCount += 1;
     this.persistNode(plan, execution);
-    this.observer.nodeStarted(node, execution.visits);
+    const context = this.nodeContext(graph, node);
+    this.observer.nodeStarted(node, execution.visits, context);
 
     if (node.kind === "checkpoint") {
       this.completeCheckpoint(execution, node);
@@ -381,7 +421,7 @@ export class GraphScheduler {
             session,
             modelId: node.modelId,
             job: node.job,
-            context: `Run goal: ${this.goal}`,
+            context,
             access: node.access,
             outputSchema: NODE_OUTCOME_JSON_SCHEMA,
             onSession: (ref) => {
@@ -454,7 +494,11 @@ export class GraphScheduler {
     plan.stepCount += 1;
     plan.status = "paused";
     this.persistNode(plan, execution);
-    this.observer.nodeStarted(node, execution.visits);
+    this.observer.nodeStarted(
+      node,
+      execution.visits,
+      this.nodeContext(graph, node),
+    );
     this.observer.planUpdated(plan);
   }
 

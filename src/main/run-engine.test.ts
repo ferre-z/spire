@@ -27,6 +27,14 @@ function ok(summary = "done"): NodeOutcome {
   };
 }
 
+function select(edgeIds: string[], summary = "done"): NodeOutcome {
+  return { ...ok(summary), selectedEdgeIds: edgeIds };
+}
+
+function rejected(summary = "needs changes"): NodeOutcome {
+  return { ...ok(summary), status: "failed" };
+}
+
 class FakeAdapter implements HarnessAdapter {
   readonly id = "opencode" as const;
   readonly calls: HarnessRunInput[] = [];
@@ -122,6 +130,13 @@ function graph(maxIterations = 3): GraphDefinition {
         condition: "always",
         label: "review",
       },
+      {
+        id: "revise",
+        source: "planner",
+        target: "implementer",
+        condition: "needs_changes",
+        label: "revise",
+      },
     ],
   };
 }
@@ -144,10 +159,14 @@ function setup(
 }
 
 describe("RunEngine", () => {
-  it("runs a legacy two-node graph end-to-end through the scheduler", async () => {
+  it("runs a legacy two-node graph to first-pass accept in three node calls", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "spire-engine-"));
     const database = new SpireDatabase(path.join(directory, "test.sqlite"));
-    const adapter = new FakeAdapter();
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("built"),
+      ok("accepted"),
+    ]);
     const { engine, events } = setup(adapter, database);
     const run = await engine.start({
       graph: graph(),
@@ -164,8 +183,9 @@ describe("RunEngine", () => {
     expect(events).toContain("status");
 
     // The run compiled a persisted execution plan and routed every node
-    // through the harness registry: the migrated legacy cycle runs planner
-    // and implementer up to their visit bounds.
+    // through the harness registry. The migrated handoff edge is `selected`:
+    // the planner selects it after the brief, and the review-accept does NOT
+    // refire the implementer — the legacy early-accept behavior is preserved.
     const plan = database.getExecutionPlan(run.id)!;
     expect(plan.status).toBe("succeeded");
     expect(plan.graphId).toBe("graph");
@@ -173,20 +193,82 @@ describe("RunEngine", () => {
       "planner",
       "implementer",
       "planner",
+    ]);
+    const executions = database.listNodeExecutions(run.id);
+    expect(executions.map((node) => node.visits)).toEqual([1, 2]);
+    expect(saved.iteration).toBe(1);
+    database.close();
+  });
+
+  it("loops through a needs_changes review before accepting", async () => {
+    const database = new SpireDatabase(":memory:");
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("first build"),
+      rejected(),
+      ok("second build"),
+      ok("accepted"),
+    ]);
+    const { engine } = setup(adapter, database);
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+    });
+
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    // The rejected review fires the revise (failure) edge, re-running the
+    // implementer; the later accept ends the run.
+    expect(adapter.calls.map((call) => call.nodeId)).toEqual([
+      "planner",
       "implementer",
       "planner",
       "implementer",
+      "planner",
     ]);
+    const saved = database.getRun(run.id)!;
+    expect(saved.iteration).toBe(2);
+    database.close();
+  });
+
+  it("stops looping at the maxVisits bound when review never accepts", async () => {
+    const database = new SpireDatabase(":memory:");
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("build 1"),
+      rejected(),
+      ok("build 2"),
+      rejected(),
+      ok("build 3"),
+    ]);
+    const { engine } = setup(adapter, database);
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+    });
+
+    await vi.waitFor(
+      () =>
+        expect(["succeeded", "needs_attention"]).toContain(
+          database.getRun(run.id)?.status,
+        ),
+      { timeout: 3000 },
+    );
+    // Three planner visits and three implementer visits, then the bound holds.
+    expect(adapter.calls).toHaveLength(6);
     const executions = database.listNodeExecutions(run.id);
     expect(executions.map((node) => node.visits)).toEqual([3, 3]);
-    expect(saved.iteration).toBe(3);
     database.close();
   });
 
   it("stops with needs_attention at the step cap", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "spire-limit-"));
     const database = new SpireDatabase(path.join(directory, "test.sqlite"));
-    const adapter = new FakeAdapter();
+    const adapter = new FakeAdapter([select(["a"], "brief written"), ok("built")]);
     const { engine } = setup(adapter, database);
     const run = await engine.start({
       graph: graph(1),
@@ -202,15 +284,21 @@ describe("RunEngine", () => {
     database.close();
   });
 
-  it("retries a capped run until the graph quiesces", async () => {
+  it("retries a capped run to completion", async () => {
     const database = new SpireDatabase(":memory:");
-    const adapter = new FakeAdapter();
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("built"),
+      ok("accepted"),
+    ]);
     const { engine } = setup(adapter, database);
     const run = await engine.start({
       graph: graph(1),
       repositoryPath: "/tmp/repository",
       goal: "Add value",
     });
+    // maxIterations 1 compiles to maxSteps 2: the review step exceeds the
+    // initial budget.
     await vi.waitFor(
       () => expect(database.getRun(run.id)?.status).toBe("needs_attention"),
       { timeout: 3000 },
@@ -218,16 +306,15 @@ describe("RunEngine", () => {
 
     await engine.retry(run.id);
     await vi.waitFor(
-      () =>
-        expect(database.getRun(run.id)?.status).toBe("needs_attention"),
-      { timeout: 3000 },
-    );
-    await engine.retry(run.id);
-    await vi.waitFor(
       () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
       { timeout: 3000 },
     );
-    expect(adapter.calls).toHaveLength(6);
+    // brief, build, then the review after the retry.
+    expect(adapter.calls.map((call) => call.nodeId)).toEqual([
+      "planner",
+      "implementer",
+      "planner",
+    ]);
     database.close();
   });
 
@@ -278,10 +365,19 @@ describe("RunEngine", () => {
       graphVersion: 1,
       revision: 0,
       status: "running",
-      stepCount: 2,
+      stepCount: 3,
       nodes: [
-        { nodeId: "planner", status: "succeeded", visits: 1, outcome: ok() },
-        { nodeId: "implementer", status: "running", visits: 1 },
+        {
+          nodeId: "planner",
+          status: "running",
+          visits: 2,
+        },
+        {
+          nodeId: "implementer",
+          status: "succeeded",
+          visits: 1,
+          outcome: ok("built"),
+        },
       ],
       edges: [
         {
@@ -289,7 +385,7 @@ describe("RunEngine", () => {
           source: "planner",
           target: "implementer",
           kind: "handoff",
-          when: "always",
+          when: "selected",
           label: "brief",
         },
         {
@@ -297,26 +393,39 @@ describe("RunEngine", () => {
           source: "implementer",
           target: "planner",
           kind: "review",
-          when: "always",
+          when: "success",
           label: "review",
+        },
+        {
+          id: "revise",
+          source: "planner",
+          target: "implementer",
+          kind: "handoff",
+          when: "failure",
+          label: "revise",
         },
       ],
       patches: [],
       updatedAt: startedAt,
     });
 
-    const adapter = new FakeAdapter();
+    const adapter = new FakeAdapter([ok("rebuilt"), ok("accepted")]);
     const { engine } = setup(adapter, database);
     expect(engine.activeId).toBe("run-1");
     await vi.waitFor(
       () => expect(database.getRun("run-1")?.status).toBe("succeeded"),
       { timeout: 3000 },
     );
-    // The orphaned attempt was converted to a failure, not the whole run.
+    // The orphaned review attempt was converted to a failure, not the whole
+    // run: the revise edge routed the build back through the implementer and
+    // the recovered review accepted.
     const plan = database.getExecutionPlan("run-1")!;
-    const orphaned = plan.nodes.find((node) => node.nodeId === "implementer")!;
-    expect(orphaned.visits).toBe(3);
-    expect(adapter.calls.length).toBeGreaterThan(0);
+    const planner = plan.nodes.find((node) => node.nodeId === "planner")!;
+    expect(planner.visits).toBe(3);
+    expect(adapter.calls.map((call) => call.nodeId)).toEqual([
+      "implementer",
+      "planner",
+    ]);
     database.close();
   });
 });
@@ -325,7 +434,11 @@ describe("RunEngine trace journaling", () => {
   it("journals transitions, prompts, responses, and tool activity", async () => {
     const database = new SpireDatabase(":memory:");
     const journal = database.createTraceJournal();
-    const adapter = new FakeAdapter();
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("built"),
+      ok("accepted"),
+    ]);
     const { engine } = setup(adapter, database, journal);
     const run = await engine.start({
       graph: graph(),
