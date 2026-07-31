@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type SpireApi } from "../shared/api";
 import type {
   GraphDefinition,
+  GraphDefinitionV2,
+  HarnessId,
   ProviderInput,
   RunEvent,
   StartRunInput,
@@ -22,7 +24,7 @@ const api: SpireApi = {
   connectOpenRouter: (input: ProviderInput) =>
     ipcRenderer.invoke(IPC.connectOpenRouter, input),
   chooseRepository: () => ipcRenderer.invoke(IPC.chooseRepository),
-  saveGraph: (graph: GraphDefinition) =>
+  saveGraph: (graph: GraphDefinition | GraphDefinitionV2) =>
     ipcRenderer.invoke(IPC.saveGraph, graph),
   startRun: (input: StartRunInput) =>
     ipcRenderer.invoke(IPC.startRun, input),
@@ -57,6 +59,9 @@ const api: SpireApi = {
   },
   graphsValidate: (graph: Record<string, unknown>) =>
     ipcRenderer.invoke(IPC.graphsValidate, graph),
+  harnessesList: () => ipcRenderer.invoke(IPC.harnessesList),
+  harnessesModels: (harnessId: HarnessId) =>
+    ipcRenderer.invoke(IPC.harnessesModels, harnessId),
   runsPlanGet: (runId: string) =>
     ipcRenderer.invoke(IPC.runsPlanGet, runId),
   runsNodesList: (input: RunScopedPageInput) =>

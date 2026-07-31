@@ -4,6 +4,8 @@ import type { BrowserWindow } from "electron";
 import { IPC } from "../shared/api";
 import type {
   GraphDefinition,
+  GraphDefinitionV2,
+  HarnessId,
   ProviderInput,
   RunEvent,
   StartRunInput,
@@ -73,10 +75,13 @@ export function registerIpc(
     });
     return validation.ok ? validation.path : null;
   });
-  ipcMain.handle(IPC.saveGraph, async (_event, graph: GraphDefinition) => {
-    await control.execute("graphs.save", { graph });
-    return control.snapshot();
-  });
+  ipcMain.handle(
+    IPC.saveGraph,
+    async (_event, graph: GraphDefinition | GraphDefinitionV2) => {
+      await control.execute("graphs.save", { graph });
+      return control.snapshot();
+    },
+  );
   ipcMain.handle(IPC.startRun, async (_event, input: StartRunInput) => {
     await control.execute("runs.start", input);
     return control.snapshot();
@@ -141,6 +146,14 @@ export function registerIpc(
   );
   ipcMain.handle(IPC.graphsValidate, (_event, graph: Record<string, unknown>) =>
     control.execute("graphs.validate", { graph }),
+  );
+  ipcMain.handle(IPC.harnessesList, () =>
+    control.execute("harnesses.list"),
+  );
+  ipcMain.handle(IPC.harnessesModels, (_event, harnessId: unknown) =>
+    control.execute("harnesses.models", {
+      harnessId: harnessId as HarnessId,
+    }),
   );
   ipcMain.handle(IPC.runsPlanGet, (_event, runId: string) =>
     control.execute("runs.plan.get", { runId }),

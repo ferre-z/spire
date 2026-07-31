@@ -2,6 +2,8 @@ import type {
   AppSnapshot,
   GraphDefinition,
   GraphDefinitionV2,
+  HarnessId,
+  ModelOption,
   ProviderInput,
   RunEvent,
   StartRunInput,
@@ -12,6 +14,7 @@ import type {
 } from "./execution";
 import type {
   GraphValidation,
+  HarnessStatus,
   MessagePage,
   NodeExecutionPage,
   PlanPatchInput,
@@ -34,7 +37,7 @@ export interface SpireApi {
   detectOpenCode(): Promise<AppSnapshot>;
   connectOpenRouter(input: ProviderInput): Promise<AppSnapshot>;
   chooseRepository(): Promise<string | null>;
-  saveGraph(graph: GraphDefinition): Promise<AppSnapshot>;
+  saveGraph(graph: GraphDefinition | GraphDefinitionV2): Promise<AppSnapshot>;
   startRun(input: StartRunInput): Promise<AppSnapshot>;
   stopRun(runId: string): Promise<AppSnapshot>;
   retryRun(runId: string): Promise<AppSnapshot>;
@@ -50,6 +53,8 @@ export interface SpireApi {
   onRunEvent(listener: (event: RunEvent) => void): Unsubscribe;
   onTraceEvent(listener: (event: TraceEvent) => void): Unsubscribe;
   graphsValidate(graph: Record<string, unknown>): Promise<GraphValidation>;
+  harnessesList(): Promise<HarnessStatus[]>;
+  harnessesModels(harnessId: HarnessId): Promise<ModelOption[]>;
   runsPlanGet(runId: string): Promise<ExecutionPlan>;
   runsNodesList(input: RunScopedPageInput): Promise<NodeExecutionPage>;
   runsMessagesList(input: RunScopedPageInput): Promise<MessagePage>;
@@ -81,6 +86,8 @@ export const IPC = {
   runEvent: "spire:run-event",
   traceEvent: "spire:trace-event",
   graphsValidate: "spire:graphs-validate",
+  harnessesList: "spire:harnesses-list",
+  harnessesModels: "spire:harnesses-models",
   runsPlanGet: "spire:runs-plan-get",
   runsNodesList: "spire:runs-nodes-list",
   runsMessagesList: "spire:runs-messages-list",
