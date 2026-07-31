@@ -115,5 +115,41 @@ export function createControlRegistry(control: SpireControl): ControlRegistry {
       ...CONTROL_CAPABILITIES["traces.tail"],
       handler: (input) => control.handleTracesTail(input),
     },
+    "graphs.validate": {
+      ...CONTROL_CAPABILITIES["graphs.validate"],
+      handler: (input) => control.handleGraphsValidate(input),
+    },
+    "runs.plan.get": {
+      ...CONTROL_CAPABILITIES["runs.plan.get"],
+      handler: (input) => control.handleRunsPlanGet(input),
+    },
+    "runs.nodes.list": {
+      ...CONTROL_CAPABILITIES["runs.nodes.list"],
+      handler: (input) => control.handleRunsNodesList(input),
+    },
+    "runs.messages.list": {
+      ...CONTROL_CAPABILITIES["runs.messages.list"],
+      handler: (input) => control.handleRunsMessagesList(input),
+    },
+    "runs.messages.send": {
+      ...CONTROL_CAPABILITIES["runs.messages.send"],
+      handler: (input) => control.handleRunsMessagesSend(input),
+    },
+    "runs.plan.patch": {
+      ...CONTROL_CAPABILITIES["runs.plan.patch"],
+      handler: (input) => control.handleRunsPlanPatch(input),
+    },
+    "runs.plan.rollback": {
+      ...CONTROL_CAPABILITIES["runs.plan.rollback"],
+      handler: (input) => control.handleRunsPlanRollback(input),
+    },
+    "runs.checkpoint.resume": {
+      ...CONTROL_CAPABILITIES["runs.checkpoint.resume"],
+      handler: (input) => control.handleRunsCheckpointResume(input),
+    },
+    "runs.plan.promote": {
+      ...CONTROL_CAPABILITIES["runs.plan.promote"],
+      handler: (input) => control.handleRunsPlanPromote(input),
+    },
   };
 }

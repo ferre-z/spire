@@ -3,6 +3,7 @@ import {
   ResourceTemplate,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LoggingMessageNotification } from "@modelcontextprotocol/sdk/types.js";
+import { CONTROL_PAGE_MAX_LIMIT } from "../shared/control";
 import type { TraceEvent, TraceLevel } from "../shared/trace";
 import type { ControlChannel } from "./socket-client";
 
@@ -44,6 +45,26 @@ export const SPIRE_RESOURCE_TEMPLATES: SpireResourceTemplate[] = [
     name: "run-traces",
     uriTemplate: "spire://traces/{runId}",
     description: "Redacted trace journal events for one run.",
+  },
+  {
+    name: "run-plan",
+    uriTemplate: "spire://runs/{runId}/plan",
+    description: "The persisted execution plan for a run.",
+  },
+  {
+    name: "run-node",
+    uriTemplate: "spire://runs/{runId}/nodes/{nodeId}",
+    description: "One node execution from a run's plan.",
+  },
+  {
+    name: "run-messages",
+    uriTemplate: "spire://runs/{runId}/messages",
+    description: "Collaboration messages for a run (first page).",
+  },
+  {
+    name: "run-patches",
+    uriTemplate: "spire://runs/{runId}/patches",
+    description: "Applied plan patches for a run.",
   },
 ];
 
@@ -138,6 +159,83 @@ export function registerSpireResources(
           runId: templateVariable(variables, "runId"),
         }),
       ),
+  );
+
+  server.registerResource(
+    "run-plan",
+    new ResourceTemplate("spire://runs/{runId}/plan", {
+      list: undefined,
+    }),
+    {
+      description: "The persisted execution plan for a run.",
+      mimeType: JSON_MIME,
+    },
+    async (uri, variables) =>
+      jsonContents(
+        uri.href,
+        await channel.execute("runs.plan.get", {
+          runId: templateVariable(variables, "runId"),
+        }),
+      ),
+  );
+
+  server.registerResource(
+    "run-node",
+    new ResourceTemplate("spire://runs/{runId}/nodes/{nodeId}", {
+      list: undefined,
+    }),
+    {
+      description: "One node execution from a run's plan.",
+      mimeType: JSON_MIME,
+    },
+    async (uri, variables) => {
+      const runId = templateVariable(variables, "runId");
+      const nodeId = templateVariable(variables, "nodeId");
+      const page = await channel.execute("runs.nodes.list", {
+        runId,
+        limit: CONTROL_PAGE_MAX_LIMIT,
+      });
+      const node = page.nodes.find((item) => item.nodeId === nodeId);
+      if (!node) {
+        throw new Error(`Node ${nodeId} not found in run ${runId}.`);
+      }
+      return jsonContents(uri.href, node);
+    },
+  );
+
+  server.registerResource(
+    "run-messages",
+    new ResourceTemplate("spire://runs/{runId}/messages", {
+      list: undefined,
+    }),
+    {
+      description: "Collaboration messages for a run (first page).",
+      mimeType: JSON_MIME,
+    },
+    async (uri, variables) =>
+      jsonContents(
+        uri.href,
+        await channel.execute("runs.messages.list", {
+          runId: templateVariable(variables, "runId"),
+          limit: CONTROL_PAGE_MAX_LIMIT,
+        }),
+      ),
+  );
+
+  server.registerResource(
+    "run-patches",
+    new ResourceTemplate("spire://runs/{runId}/patches", {
+      list: undefined,
+    }),
+    {
+      description: "Applied plan patches for a run.",
+      mimeType: JSON_MIME,
+    },
+    async (uri, variables) => {
+      const runId = templateVariable(variables, "runId");
+      const plan = await channel.execute("runs.plan.get", { runId });
+      return jsonContents(uri.href, plan.patches);
+    },
   );
 }
 

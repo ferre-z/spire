@@ -2,8 +2,21 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { GraphDefinition, RunRecord } from "../../shared/domain";
+import type {
+  GraphDefinition,
+  GraphDefinitionV2,
+  GraphNode,
+  PlanMutation,
+  RunRecord,
+} from "../../shared/domain";
 import { CONTROL_OPERATION_NAMES } from "../../shared/control";
+import type {
+  AppliedPlanPatch,
+  CollaborationMessageDraft,
+  ExecutionPlan,
+  NodeExecution,
+  PlanPatchDraft,
+} from "../../shared/execution";
 import type { TraceEvent } from "../../shared/trace";
 import { WORKSPACE_LAYOUT_SCHEMA_VERSION } from "../../shared/workspace";
 import type { WorkspaceLayoutRecord } from "../../shared/workspace";
@@ -24,6 +37,7 @@ import type {
   HarnessSessionRef,
 } from "../../shared/harness";
 import { createHarnessRegistry } from "../harness/registry";
+import { migrateLegacyGraph } from "../graph-migration";
 import { RunEngine } from "../run-engine";
 import type { ExecutionBackend, PreparedWorkspace } from "../worktree";
 import { SpireControl } from "./spire-control";
@@ -184,6 +198,153 @@ function graph(id = "graph", version = 1, maxIterations = 3): GraphDefinition {
   };
 }
 
+const ALL_ACTIONS: PlanMutation[] = [
+  "retry",
+  "skip",
+  "reorder",
+  "reroute",
+  "pause",
+  "replace",
+  "insert",
+  "remove",
+  "edit",
+];
+
+/** A v2 graph with a planner that has graph-scope authority for patching. */
+function graphV2(id = "graph", version = 1, maxSteps = 100): GraphDefinitionV2 {
+  return {
+    id,
+    name: "Build",
+    version,
+    nodes: [
+      {
+        kind: "agent",
+        id: "planner",
+        name: "Architect",
+        roleLabel: "planner",
+        job: "Plan the work.",
+        harnessId: "opencode",
+        modelId: "openrouter/test",
+        access: { mode: "read-only", writeScopes: [] },
+        authority: { scope: "graph", actions: ALL_ACTIONS },
+        activation: "all",
+        maxVisits: 3,
+        position: { x: 0, y: 0 },
+      },
+      {
+        kind: "agent",
+        id: "implementer",
+        name: "Builder",
+        roleLabel: "implementer",
+        job: "Build the work.",
+        harnessId: "opencode",
+        modelId: "openrouter/test",
+        access: { mode: "workspace-write", writeScopes: ["."] },
+        authority: { scope: "self", actions: [] },
+        activation: "all",
+        maxVisits: 3,
+        position: { x: 200, y: 0 },
+      },
+    ],
+    edges: [
+      {
+        id: "a",
+        source: "planner",
+        target: "implementer",
+        kind: "handoff",
+        when: "selected",
+        label: "brief",
+      },
+      {
+        id: "b",
+        source: "implementer",
+        target: "planner",
+        kind: "review",
+        when: "always",
+        label: "review",
+      },
+    ],
+    maxSteps,
+    groups: [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/** A v2 graph with a manual checkpoint between planner and implementer. */
+function graphV2WithCheckpoint(id = "graph-cp", version = 1): GraphDefinitionV2 {
+  return {
+    id,
+    name: "Checkpoint Test",
+    version,
+    nodes: [
+      {
+        kind: "agent",
+        id: "planner",
+        name: "Architect",
+        roleLabel: "planner",
+        job: "Plan the work.",
+        harnessId: "opencode",
+        modelId: "openrouter/test",
+        access: { mode: "read-only", writeScopes: [] },
+        authority: { scope: "graph", actions: ALL_ACTIONS },
+        activation: "any",
+        maxVisits: 3,
+        position: { x: 0, y: 0 },
+      },
+      {
+        kind: "checkpoint",
+        id: "checkpoint",
+        name: "Gate",
+        mode: "manual",
+        position: { x: 200, y: 0 },
+      },
+      {
+        kind: "agent",
+        id: "implementer",
+        name: "Builder",
+        roleLabel: "implementer",
+        job: "Build the work.",
+        harnessId: "opencode",
+        modelId: "openrouter/test",
+        access: { mode: "workspace-write", writeScopes: ["."] },
+        authority: { scope: "self", actions: [] },
+        activation: "all",
+        maxVisits: 3,
+        position: { x: 400, y: 0 },
+      },
+    ],
+    edges: [
+      {
+        id: "plan-cp",
+        source: "planner",
+        target: "checkpoint",
+        kind: "handoff",
+        when: "selected",
+        label: "plan",
+      },
+      {
+        id: "cp-impl",
+        source: "checkpoint",
+        target: "implementer",
+        kind: "dependency",
+        when: "always",
+        label: "implement",
+      },
+      {
+        id: "impl-review",
+        source: "implementer",
+        target: "planner",
+        kind: "review",
+        when: "success",
+        label: "review",
+      },
+    ],
+    maxSteps: 100,
+    groups: [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
 function layoutRecord(graphId = "graph"): WorkspaceLayoutRecord {
   return {
     graphId,
@@ -242,14 +403,14 @@ describe("SpireControl registry", () => {
   it("exposes one capability per ControlOperationMap key", () => {
     const { control } = createControl();
     const listed = control.listCapabilities();
-    // ControlOperationMap has exactly 20 operations; the mapped type ties the
+    // ControlOperationMap has exactly 29 operations; the mapped type ties the
     // dispatch registry to it at compile time, so assert runtime coverage of
     // the registry itself — keys, count, and a bound handler per operation.
-    expect(CONTROL_OPERATION_NAMES).toHaveLength(20);
+    expect(CONTROL_OPERATION_NAMES).toHaveLength(29);
     expect(Object.keys(listed).sort()).toEqual(
       [...CONTROL_OPERATION_NAMES].sort(),
     );
-    expect(Object.keys(listed)).toHaveLength(20);
+    expect(Object.keys(listed)).toHaveLength(29);
     for (const name of CONTROL_OPERATION_NAMES) {
       expect(typeof listed[name].handler).toBe("function");
       expect(listed[name].inputSchema).toBeDefined();
@@ -335,6 +496,39 @@ describe("SpireControl registry", () => {
     await expect(
       control.execute("traces.tail", { afterSequence: 0 }),
     ).resolves.toMatchObject({ nextCursor: null });
+
+    // --- New operations: graph validation, plan/nodes/messages, patches ---
+    const v2graph = migrateLegacyGraph(graph());
+    await expect(
+      control.execute("graphs.validate", { graph: v2graph }),
+    ).resolves.toMatchObject({ valid: true });
+
+    await expect(
+      control.execute("runs.plan.get", { runId: run.id }),
+    ).resolves.toMatchObject({ runId: run.id });
+
+    await expect(
+      control.execute("runs.nodes.list", { runId: run.id }),
+    ).resolves.toMatchObject({ nodes: expect.any(Array) });
+
+    await expect(
+      control.execute("runs.messages.list", { runId: run.id }),
+    ).resolves.toMatchObject({ messages: expect.any(Array) });
+
+    const sent = await control.execute("runs.messages.send", {
+      runId: run.id,
+      recipient: { kind: "node", id: "implementer" },
+      kind: "question",
+      subject: "Test message",
+      body: "Can you build this?",
+      artifactPaths: [],
+      senderNodeId: "user",
+    });
+    expect(sent).toEqual({
+      sent: true,
+      messageId: expect.any(String),
+      sequence: 0,
+    });
   });
 });
 
@@ -898,6 +1092,433 @@ describe("traces operations", () => {
     expect(
       rest.events.every((event) => event.sequence > first.sequence),
     ).toBe(true);
+  });
+});
+
+describe("graphs.validate", () => {
+  it("accepts a valid graph v2 definition", async () => {
+    const { control } = createControl();
+    const v2graph = migrateLegacyGraph(graph());
+    await expect(
+      control.execute("graphs.validate", { graph: v2graph }),
+    ).resolves.toEqual({ valid: true, issues: [] });
+  });
+
+  it("reports validation issues for a structurally broken graph", async () => {
+    const { control } = createControl();
+    const broken = migrateLegacyGraph(graph());
+    broken.nodes = [broken.nodes[0]]; // only one node, edges reference removed node
+    const result = await control.execute("graphs.validate", { graph: broken });
+    expect(result.valid).toBe(false);
+    expect(result.issues.length).toBeGreaterThan(0);
+  });
+
+  it("reports issues for non-graph input instead of throwing", async () => {
+    const { control } = createControl();
+    const result = await control.execute("graphs.validate", {
+      graph: { id: "broken" },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.issues.length).toBeGreaterThan(0);
+  });
+});
+
+describe("runs.plan operations", () => {
+  it("gets the persisted execution plan for a run", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graph(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    const plan = await control.execute("runs.plan.get", { runId: run.id });
+    expect(plan.runId).toBe(run.id);
+    expect(plan.nodes.length).toBeGreaterThan(0);
+    expect(plan.edges.length).toBeGreaterThan(0);
+  });
+
+  it("rejects runs.plan.get for an unknown run", () => {
+    const { control } = createControl();
+    expect(() =>
+      control.execute("runs.plan.get", { runId: "missing" }),
+    ).toThrow(/not found/i);
+  });
+
+  it("rejects malformed runId input", () => {
+    const { control } = createControl();
+    expect(() => control.execute("runs.plan.get", {})).toThrow();
+  });
+});
+
+describe("runs.nodes.list", () => {
+  it("lists node executions for a completed run", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graph(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    const result = await control.execute("runs.nodes.list", { runId: run.id });
+    expect(result.nodes.length).toBeGreaterThan(0);
+    expect(result.nextCursor).toBeNull();
+    for (const node of result.nodes) {
+      expect(node).toHaveProperty("nodeId");
+      expect(node).toHaveProperty("status");
+      expect(node).toHaveProperty("visits");
+    }
+  });
+
+  it("paginates node executions with an opaque cursor", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graph(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    const first = await control.execute("runs.nodes.list", {
+      runId: run.id,
+      limit: 1,
+    });
+    expect(first.nodes).toHaveLength(1);
+    if (first.nextCursor) {
+      const second = await control.execute("runs.nodes.list", {
+        runId: run.id,
+        limit: 1,
+        cursor: first.nextCursor,
+      });
+      expect(second.nodes.length).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("rejects an unknown run", () => {
+    const { control } = createControl();
+    expect(() =>
+      control.execute("runs.nodes.list", { runId: "missing" }),
+    ).toThrow(/not found/i);
+  });
+});
+
+describe("runs.messages.list", () => {
+  it("lists messages for a run that has messages", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graph(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    await control.execute("runs.messages.send", {
+      runId: run.id,
+      recipient: { kind: "node", id: "implementer" },
+      kind: "question",
+      subject: "Test",
+      body: "Question body",
+      artifactPaths: [],
+      senderNodeId: "user",
+    });
+    const result = await control.execute("runs.messages.list", {
+      runId: run.id,
+    });
+    expect(result.messages).toHaveLength(1);
+    expect(result.nextCursor).toBeNull();
+    expect(result.messages[0].subject).toBe("Test");
+  });
+
+  it("returns an empty list when no messages exist", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graph(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    const result = await control.execute("runs.messages.list", {
+      runId: run.id,
+    });
+    expect(result.messages).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("rejects an unknown run", () => {
+    const { control } = createControl();
+    expect(() =>
+      control.execute("runs.messages.list", { runId: "missing" }),
+    ).toThrow(/not found/i);
+  });
+});
+
+describe("runs.messages.send", () => {
+  it("sends a message and persists it with a sequence number", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graph(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    const result = await control.execute("runs.messages.send", {
+      runId: run.id,
+      recipient: { kind: "node", id: "implementer" },
+      kind: "handoff",
+      subject: "Brief",
+      body: "Here is the brief.",
+      artifactPaths: [],
+      senderNodeId: "user",
+    });
+    expect(result.sent).toBe(true);
+    expect(result.sequence).toBe(0);
+    const stored = database.listCollaborationMessages(run.id);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].subject).toBe("Brief");
+    expect(stored[0].senderNodeId).toBe("user");
+  });
+
+  it("rejects sending to an unknown run", async () => {
+    const { control } = createControl();
+    await expect(
+      control.execute("runs.messages.send", {
+        runId: "missing",
+        recipient: { kind: "node", id: "impl" },
+        kind: "question",
+        subject: "Test",
+        body: "Body",
+        artifactPaths: [],
+        senderNodeId: "user",
+      }),
+    ).rejects.toThrow(/not found/i);
+  });
+});
+
+describe("runs.plan.patch", () => {
+  it("applies an authorized skip patch and persists it", async () => {
+    const { control, database } = createControl([], false, [
+      selectOutcome(["plan-cp"], "brief written"),
+    ]);
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graphV2WithCheckpoint(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("needs_attention"),
+      { timeout: 3000 },
+    );
+    const plan = database.getExecutionPlan(run.id)!;
+    expect(
+      plan.nodes.find((n) => n.nodeId === "implementer")?.status,
+    ).toBe("waiting");
+    const draft: PlanPatchDraft = {
+      baseRevision: plan.revision,
+      reason: "test patch: skip implementer",
+      operations: [{ action: "skip", nodeId: "implementer" }],
+    };
+    const patch = await control.execute("runs.plan.patch", {
+      runId: run.id,
+      actorNodeId: "planner",
+      draft,
+    });
+    expect(patch.id).toBeTruthy();
+    expect(patch.appliedRevision).toBe(plan.revision + 1);
+    const repersisted = database.getExecutionPlan(run.id)!;
+    expect(repersisted.patches).toHaveLength(1);
+    expect(repersisted.patches[0].id).toBe(patch.id);
+  });
+
+  it("rejects a patch with a stale base revision", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graphV2(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    const plan = database.getExecutionPlan(run.id)!;
+    const draft: PlanPatchDraft = {
+      baseRevision: 999,
+      reason: "stale",
+      operations: [{ action: "skip", nodeId: "implementer" }],
+    };
+    expect(() =>
+      control.execute("runs.plan.patch", {
+        runId: run.id,
+        actorNodeId: "planner",
+        draft,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects patching an unknown run", () => {
+    const { control } = createControl();
+    const draft: PlanPatchDraft = {
+      baseRevision: 0,
+      reason: "test",
+      operations: [{ action: "skip", nodeId: "impl" }],
+    };
+    expect(() =>
+      control.execute("runs.plan.patch", {
+        runId: "missing",
+        actorNodeId: "planner",
+        draft,
+      }),
+    ).toThrow(/not found/i);
+  });
+});
+
+describe("runs.plan.rollback", () => {
+  it("rolls back an applied patch", async () => {
+    const { control, database } = createControl([], false, [
+      selectOutcome(["plan-cp"], "brief written"),
+    ]);
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graphV2WithCheckpoint(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("needs_attention"),
+      { timeout: 3000 },
+    );
+    const planBefore = database.getExecutionPlan(run.id)!;
+    const draft: PlanPatchDraft = {
+      baseRevision: planBefore.revision,
+      reason: "patch to roll back",
+      operations: [{ action: "skip", nodeId: "implementer" }],
+    };
+    const applied = await control.execute("runs.plan.patch", {
+      runId: run.id,
+      actorNodeId: "planner",
+      draft,
+    });
+    const rolledBack = await control.execute("runs.plan.rollback", {
+      runId: run.id,
+      patchId: applied.id,
+    });
+    expect(rolledBack.id).not.toBe(applied.id);
+    const planAfter = database.getExecutionPlan(run.id)!;
+    const target = planAfter.patches.find((p) => p.id === applied.id);
+    expect(target?.rolledBackBy).toBe(rolledBack.id);
+  });
+
+  it("rejects rolling back an unknown patch", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graphV2(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    expect(() =>
+      control.execute("runs.plan.rollback", {
+        runId: run.id,
+        patchId: "nonexistent",
+      }),
+    ).toThrow(/unknown patch/i);
+  });
+});
+
+describe("runs.checkpoint.resume", () => {
+  it("resumes a run paused at a manual checkpoint", async () => {
+    const { control, database } = createControl([], false, [
+      selectOutcome(["plan-cp"], "brief written"),
+    ]);
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graphV2WithCheckpoint(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () =>
+        expect(database.getRun(run.id)?.status).toBe("needs_attention"),
+      { timeout: 3000 },
+    );
+    const plan = await control.execute("runs.checkpoint.resume", {
+      runId: run.id,
+    });
+    expect(plan.runId).toBe(run.id);
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+  });
+
+  it("rejects resuming a run that is not paused", async () => {
+    const { control } = createControl();
+    await expect(
+      control.execute("runs.checkpoint.resume", { runId: "missing" }),
+    ).rejects.toThrow(/not found/i);
+  });
+});
+
+describe("runs.plan.promote", () => {
+  it("promotes a run plan topology to a new saved graph version", async () => {
+    const { control, database } = createControl();
+    const repositoryPath = await makeRepository();
+    const run = await control.execute("runs.start", {
+      graph: graphV2(),
+      repositoryPath,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    const promoted = await control.execute("runs.plan.promote", {
+      runId: run.id,
+      name: "Promoted Graph",
+    });
+    expect(promoted.id).toBe("graph");
+    expect(promoted.name).toBe("Promoted Graph");
+    expect(promoted.version).toBe(2);
+    const saved = database.listGraphsV2().find(
+      (g) => g.id === "graph" && g.version === 2,
+    );
+    expect(saved).toBeDefined();
+    expect(saved?.nodes).toHaveLength(2);
+  });
+
+  it("rejects promoting a plan for an unknown run", () => {
+    const { control } = createControl();
+    expect(() =>
+      control.execute("runs.plan.promote", { runId: "missing" }),
+    ).toThrow(/not found/i);
   });
 });
 

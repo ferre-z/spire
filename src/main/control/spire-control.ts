@@ -8,15 +8,26 @@ import {
   type Diagnostics,
   type GraphPage,
   type GraphRef,
+  type GraphValidation,
+  type GraphValidateInput,
   type HarnessStatus,
+  type MessagePage,
+  type NodeExecutionPage,
   type PageInput,
+  type PlanPatchInput,
+  type PlanPromoteInput,
+  type PlanRollbackInput,
   type RepositoryValidation,
   type RunPage,
   type RunQuery,
+  type RunScopedPageInput,
+  type SendMessageInput,
+  type SentMessage,
 } from "../../shared/control";
 import type {
   AppSnapshot,
   GraphDefinition,
+  GraphDefinitionV2,
   HarnessId,
   ModelOption,
   OpenCodeStatus,
@@ -26,6 +37,14 @@ import type {
   StartRunInput,
   UpdateGraphInput,
 } from "../../shared/domain";
+import { graphDefinitionV2Schema } from "../../shared/domain";
+import type {
+  AppliedPlanPatch,
+  ExecutionPlan,
+  NodeExecution,
+  PlanPatchDraft,
+} from "../../shared/execution";
+import type { CollaborationMessage } from "../../shared/collaboration";
 import type { HarnessRegistry } from "../../shared/harness";
 import type { TraceCursor, TraceFilter, TraceListener, TracePage } from "../../shared/trace";
 import type { JsonValue, WorkspaceLayoutRecord } from "../../shared/workspace";
@@ -503,6 +522,80 @@ export class SpireControl {
 
   handleTracesTail(input: TraceCursor): TracePage {
     return this.deps.journal.query({ cursor: input });
+  }
+
+  // --- New operation handlers -----------------------------------------------
+
+  handleGraphsValidate(input: GraphValidateInput): GraphValidation {
+    const result = graphDefinitionV2Schema.safeParse(input.graph);
+    if (result.success) {
+      return { valid: true, issues: [] };
+    }
+    return {
+      valid: false,
+      issues: result.error.issues.map((issue) => issue.message),
+    };
+  }
+
+  handleRunsPlanGet(input: { runId: string }): ExecutionPlan {
+    return this.deps.engine.getExecutionPlan(input.runId);
+  }
+
+  handleRunsNodesList(input: RunScopedPageInput): NodeExecutionPage {
+    const run = this.requireRun(input.runId);
+    const nodes = this.deps.database.listNodeExecutions(input.runId);
+    const result = page(nodes, parseCursor(input.cursor), input.limit);
+    return { nodes: result.items, nextCursor: result.nextCursor };
+  }
+
+  handleRunsMessagesList(input: RunScopedPageInput): MessagePage {
+    this.requireRun(input.runId);
+    const messages = this.deps.database.listCollaborationMessages(input.runId);
+    const result = page(messages, parseCursor(input.cursor), input.limit);
+    return { messages: result.items, nextCursor: result.nextCursor };
+  }
+
+  async handleRunsMessagesSend(
+    input: SendMessageInput,
+  ): Promise<SentMessage> {
+    const message = await this.deps.engine.deliverMessage(
+      input.runId,
+      {
+        recipient: input.recipient,
+        kind: input.kind,
+        subject: input.subject,
+        body: input.body,
+        artifactPaths: input.artifactPaths,
+      },
+      input.senderNodeId,
+    );
+    return {
+      sent: true,
+      messageId: message.id,
+      sequence: message.sequence,
+    };
+  }
+
+  handleRunsPlanPatch(input: PlanPatchInput): AppliedPlanPatch {
+    return this.deps.engine.applyPlanPatch(
+      input.runId,
+      input.actorNodeId,
+      input.draft,
+    );
+  }
+
+  handleRunsPlanRollback(input: PlanRollbackInput): AppliedPlanPatch {
+    return this.deps.engine.rollbackPlanPatch(input.runId, input.patchId);
+  }
+
+  async handleRunsCheckpointResume(input: {
+    runId: string;
+  }): Promise<ExecutionPlan> {
+    return this.deps.engine.resumeCheckpoint(input.runId);
+  }
+
+  handleRunsPlanPromote(input: PlanPromoteInput): GraphDefinitionV2 {
+    return this.deps.engine.promotePlan(input.runId, input.name);
   }
 
   // --- Internals -----------------------------------------------------------
