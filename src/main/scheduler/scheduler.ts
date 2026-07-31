@@ -231,9 +231,14 @@ export class GraphScheduler {
    * Nodes that were never activated (still `waiting`/`queued` with zero
    * visits) are marked `skipped` first: they are branches legitimately
    * unreached due to routing — e.g. an all-join whose other input sat on a
-   * branch that was not taken (the no-ready-node deadlock case). A plan then
-   * fails only when a node failure was never routed downstream; otherwise it
-   * succeeds.
+   * branch that was not taken (the no-ready-node deadlock case).
+   *
+   * Status precedence: an unhandled failure settles `failed`; otherwise a
+   * suppressed route — an edge whose token was ready to fire but whose target
+   * exhausted its maxVisits bound — settles `needs_attention` (budget
+   * exhaustion, matching the legacy iteration-cap signal); otherwise
+   * `succeeded`. Routes that simply never fired because the outcome selected
+   * or conditioned no onward edge are not suppressions.
    */
   private settle(graph: CompiledGraph, plan: ExecutionPlan): ExecutionPlan {
     for (const execution of plan.nodes) {
@@ -249,10 +254,36 @@ export class GraphScheduler {
       (execution) =>
         execution.status === "failed" && !this.failureHandled(graph, plan, execution),
     );
-    plan.status = unhandled.length > 0 ? "failed" : "succeeded";
+    plan.status =
+      unhandled.length > 0
+        ? "failed"
+        : this.hasSuppressedRoute(graph, plan)
+          ? "needs_attention"
+          : "succeeded";
     this.persist(plan);
     this.observer.planUpdated(plan);
     return plan;
+  }
+
+  /**
+   * A route is suppressed when an edge has a pending token (the source
+   * completed a visit the target has not consumed, and the edge condition is
+   * satisfied) but the target cannot accept it because it exhausted its
+   * maxVisits bound.
+   */
+  private hasSuppressedRoute(
+    graph: CompiledGraph,
+    plan: ExecutionPlan,
+  ): boolean {
+    const byId = new Map(plan.nodes.map((node) => [node.nodeId, node]));
+    const seeds = new Set(graph.seedIds);
+    return graph.edges.some((edge) => {
+      const target = byId.get(edge.target);
+      const node = graph.nodes.find((item) => item.id === edge.target);
+      if (!target || !node) return false;
+      if (target.visits < this.maxVisits(node)) return false;
+      return this.tokenPending(graph, plan, byId, seeds, edge);
+    });
   }
 
   /**

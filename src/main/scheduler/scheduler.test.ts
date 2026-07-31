@@ -425,11 +425,29 @@ describe("GraphScheduler", () => {
     );
     const { scheduler, compiled, plan, obs } = setup(definition, adapter);
     const final = await scheduler.start(compiled, plan);
-    expect(final.status).toBe("succeeded");
+    // b's last completion still has a route into a, but a is at its visit
+    // cap: the suppressed route settles as needs_attention.
+    expect(final.status).toBe("needs_attention");
     expect(nodeIds(adapter)).toEqual(["a", "b", "a", "b", "a", "b"]);
     expect(final.nodes.map((node) => node.visits)).toEqual([3, 3]);
     // Every visit is its own attempt, reported as a separate start.
     expect(obs.nodeStarted).toHaveBeenCalledTimes(6);
+  });
+
+  it("prefers failed over needs_attention when both apply at settle", async () => {
+    // f fails with no routing (unhandled) while the a<->b loop exhausts its
+    // visit budget with a suppressed route: failed wins.
+    const adapter = new FakeAdapter("opencode", [failedOutcome()]);
+    const definition = graph(
+      [agent("f"), agent("a"), agent("b")],
+      [edge("ab", "a", "b"), edge("ba", "b", "a")],
+    );
+    const { scheduler, compiled, plan } = setup(definition, adapter);
+    const final = await scheduler.start(compiled, plan);
+    expect(final.status).toBe("failed");
+    expect(final.nodes.find((node) => node.nodeId === "f")?.status).toBe(
+      "failed",
+    );
   });
 
   it("honors a per-node maxVisits override", async () => {
@@ -441,7 +459,7 @@ describe("GraphScheduler", () => {
     const { scheduler, compiled, plan } = setup(definition, adapter);
     const final = await scheduler.start(compiled, plan);
     expect(nodeIds(adapter)).toEqual(["a", "b", "a", "b"]);
-    expect(final.status).toBe("succeeded");
+    expect(final.status).toBe("needs_attention");
   });
 
   it("stops with needs_attention when maxSteps is exhausted with work pending", async () => {

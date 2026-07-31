@@ -253,15 +253,16 @@ describe("RunEngine", () => {
 
     await vi.waitFor(
       () =>
-        expect(["succeeded", "needs_attention"]).toContain(
-          database.getRun(run.id)?.status,
-        ),
+        expect(database.getRun(run.id)?.status).toBe("needs_attention"),
       { timeout: 3000 },
     );
-    // Three planner visits and three implementer visits, then the bound holds.
+    // Three planner visits and three implementer visits, then the bound
+    // holds: the final build-review route was ready to fire but suppressed
+    // by the planner's maxVisits — budget exhaustion, not success.
     expect(adapter.calls).toHaveLength(6);
     const executions = database.listNodeExecutions(run.id);
     expect(executions.map((node) => node.visits)).toEqual([3, 3]);
+    expect(database.getExecutionPlan(run.id)?.status).toBe("needs_attention");
     database.close();
   });
 
