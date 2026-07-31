@@ -7,6 +7,7 @@ import type {
 } from "../../shared/domain";
 import {
   nodeOutcomeSchema,
+  type AppliedPlanPatch,
   type CollaborationMessageDraft,
   type ExecutionPlan,
   type NodeExecution,
@@ -23,6 +24,12 @@ import type { SpireDatabase } from "../database";
 import { runHarnessStructured } from "../harness/adapter";
 import type { NodeWorkspaceCoordinator } from "../workspace/node-worktree";
 import type { CompiledGraph, CompiledNode } from "./graph-compiler";
+import {
+  applyPlanPatch,
+  PlanPatchError,
+  rebuildRuntimeGraph,
+  rollbackPlanPatch,
+} from "./plan-patcher";
 
 /**
  * Durable graph scheduler.
@@ -123,6 +130,8 @@ export class GraphScheduler {
   /**
    * Run a freshly compiled plan to a terminal state (or until stopped).
    * Resolves with the final plan; never rejects for node-level failures.
+   * The routing graph is the runtime universe: the base compiled graph plus
+   * every non-rolled-back patch (fresh plans have none).
    */
   async start(
     graph: CompiledGraph,
@@ -131,7 +140,7 @@ export class GraphScheduler {
     this.stopRequested = false;
     plan.status = "running";
     this.persist(plan);
-    return this.runLoop(graph, plan);
+    return this.runLoop(rebuildRuntimeGraph(graph, plan.patches), plan);
   }
 
   /**
@@ -182,7 +191,7 @@ export class GraphScheduler {
     plan.status = "running";
     this.persist(plan);
     this.observer.planUpdated(plan);
-    return this.runLoop(graph, plan);
+    return this.runLoop(rebuildRuntimeGraph(graph, plan.patches), plan);
   }
 
   /**
@@ -216,6 +225,13 @@ export class GraphScheduler {
     for (;;) {
       if (this.stopRequested) {
         plan.status = "paused";
+        this.persist(plan);
+        this.observer.planUpdated(plan);
+        return plan;
+      }
+      // A patch's pause operation takes effect at the next safe point: the
+      // current node completions finish, then the loop stops scheduling.
+      if (plan.status === "paused") {
         this.persist(plan);
         this.observer.planUpdated(plan);
         return plan;
@@ -272,7 +288,7 @@ export class GraphScheduler {
     }
     const unhandled = plan.nodes.filter(
       (execution) =>
-        execution.status === "failed" && !this.failureHandled(graph, plan, execution),
+        execution.status === "failed" && !this.failureHandled(plan, execution),
     );
     plan.status =
       unhandled.length > 0
@@ -296,13 +312,13 @@ export class GraphScheduler {
     plan: ExecutionPlan,
   ): boolean {
     const byId = new Map(plan.nodes.map((node) => [node.nodeId, node]));
-    const seeds = new Set(graph.seedIds);
-    return graph.edges.some((edge) => {
+    const seeds = this.seedIds(plan);
+    return plan.edges.some((edge) => {
       const target = byId.get(edge.target);
       const node = graph.nodes.find((item) => item.id === edge.target);
       if (!target || !node) return false;
       if (target.visits < this.maxVisits(node)) return false;
-      return this.tokenPending(graph, plan, byId, seeds, edge);
+      return this.tokenPending(plan, byId, seeds, edge);
     });
   }
 
@@ -312,12 +328,11 @@ export class GraphScheduler {
    * selected edge it chose) has since run.
    */
   private failureHandled(
-    graph: CompiledGraph,
     plan: ExecutionPlan,
     execution: NodeExecution,
   ): boolean {
     const byId = new Map(plan.nodes.map((node) => [node.nodeId, node]));
-    return graph.edges.some((edge) => {
+    return plan.edges.some((edge) => {
       if (edge.source !== execution.nodeId) return false;
       const routed =
         edge.when === "failure" ||
@@ -328,27 +343,61 @@ export class GraphScheduler {
     });
   }
 
+  /**
+   * The active topology's seed set: nodes with no incoming active edge, or —
+   * for a pure cycle — the first node in plan order. Derived from the plan
+   * (not the compiled graph) so runtime patches reshape activation.
+   */
+  private seedIds(plan: ExecutionPlan): Set<string> {
+    const targeted = new Set(plan.edges.map((edge) => edge.target));
+    const seeds = plan.nodes
+      .filter((node) => !targeted.has(node.nodeId))
+      .map((node) => node.nodeId);
+    if (seeds.length === 0 && plan.nodes.length > 0) {
+      seeds.push(plan.nodes[0].nodeId);
+    }
+    return new Set(seeds);
+  }
+
   private selectReady(graph: CompiledGraph, plan: ExecutionPlan): CompiledNode[] {
     const byId = new Map(plan.nodes.map((node) => [node.nodeId, node]));
-    const seeds = new Set(graph.seedIds);
-    return graph.nodes.filter((node) => {
-      const execution = byId.get(node.id);
-      if (!execution) return false;
-      if (execution.status === "queued") return true;
-      if (execution.status === "running") return false;
+    const configs = new Map(graph.nodes.map((node) => [node.id, node]));
+    const seeds = this.seedIds(plan);
+    const ready: CompiledNode[] = [];
+    // Plan order is the deterministic declaration order (patches may have
+    // reordered it); node configurations come from the runtime universe.
+    for (const execution of plan.nodes) {
+      const node = configs.get(execution.nodeId);
+      if (!node) continue;
+      // Terminal-unless-retried: patches (skip/remove supersede) and stops
+      // park nodes here; only an explicit retry (re-queue) revives them.
+      if (execution.status === "skipped" || execution.status === "cancelled") {
+        continue;
+      }
+      if (execution.status === "queued") {
+        ready.push(node);
+        continue;
+      }
+      if (execution.status === "running") continue;
       // `waiting` with visits > 0 is a paused manual checkpoint.
-      if (execution.status === "waiting" && execution.visits > 0) return false;
-      if (execution.visits >= this.maxVisits(node)) return false;
-      if (seeds.has(node.id) && execution.visits === 0) return true;
-      const incoming = graph.edges.filter((edge) => edge.target === node.id);
-      if (incoming.length === 0) return false;
+      if (execution.status === "waiting" && execution.visits > 0) continue;
+      if (execution.visits >= this.maxVisits(node)) continue;
+      if (seeds.has(node.id) && execution.visits === 0) {
+        ready.push(node);
+        continue;
+      }
+      const incoming = plan.edges.filter((edge) => edge.target === node.id);
+      if (incoming.length === 0) continue;
       const pending = (edge: (typeof incoming)[number]) =>
-        this.tokenPending(graph, plan, byId, seeds, edge);
+        this.tokenPending(plan, byId, seeds, edge);
       const activation = isAgentLike(node) ? node.activation : "all";
-      return activation === "any"
-        ? incoming.some(pending)
-        : incoming.every(pending);
-    });
+      const active =
+        activation === "any"
+          ? incoming.some(pending)
+          : incoming.every(pending);
+      if (active) ready.push(node);
+    }
+    return ready;
   }
 
   /**
@@ -357,7 +406,6 @@ export class GraphScheduler {
    * the edge condition.
    */
   private tokenPending(
-    graph: CompiledGraph,
     plan: ExecutionPlan,
     byId: Map<string, NodeExecution>,
     seeds: Set<string>,
@@ -401,17 +449,18 @@ export class GraphScheduler {
    * `selected` edges, the explicit routing choices (edge ids + labels) the
    * model must pick from via `selectedEdgeIds` in its NodeOutcome.
    */
-  private nodeContext(graph: CompiledGraph, node: CompiledNode): string {
-    return `Run goal: ${this.goal}${this.routingContext(graph, node)}`;
+  private nodeContext(plan: ExecutionPlan, node: CompiledNode): string {
+    return `Run goal: ${this.goal}${this.routingContext(plan, node)}`;
   }
 
   /**
    * The routing section listing a node's selectable outgoing edges. Kept in
    * every context form (plain or collaboration packet): the model must see
-   * the edge ids + labels to fill `selectedEdgeIds`.
+   * the edge ids + labels to fill `selectedEdgeIds`. Only active plan edges
+   * are offered — patch-disabled edges are not routing choices.
    */
-  private routingContext(graph: CompiledGraph, node: CompiledNode): string {
-    const selectable = graph.edges.filter(
+  private routingContext(plan: ExecutionPlan, node: CompiledNode): string {
+    const selectable = plan.edges.filter(
       (edge) => edge.source === node.id && edge.when === "selected",
     );
     if (selectable.length === 0) return "";
@@ -439,10 +488,10 @@ export class GraphScheduler {
     directory: string,
   ): Promise<string> {
     if (!this.collaboration || !isAgentLike(node)) {
-      return this.nodeContext(graph, node);
+      return this.nodeContext(plan, node);
     }
     const byId = new Map(plan.nodes.map((item) => [item.nodeId, item]));
-    const predecessors = graph.edges
+    const predecessors = plan.edges
       .filter((edge) => edge.target === node.id)
       .map((edge) => {
         const source = graph.nodes.find((item) => item.id === edge.source);
@@ -460,7 +509,7 @@ export class GraphScheduler {
       directory,
       predecessors,
     });
-    return `${packet}${this.routingContext(graph, node)}`;
+    return `${packet}${this.routingContext(plan, node)}`;
   }
 
   // --- Node execution -------------------------------------------------------
@@ -482,7 +531,7 @@ export class GraphScheduler {
       this.observer.nodeStarted(
         node,
         execution.visits,
-        this.nodeContext(graph, node),
+        this.nodeContext(plan, node),
       );
       await this.passCheckpoint(plan, execution, node);
       this.persistNode(plan, execution);
@@ -512,7 +561,7 @@ export class GraphScheduler {
         this.observer.nodeStarted(
           node,
           execution.visits,
-          this.nodeContext(graph, node),
+          this.nodeContext(plan, node),
         );
         this.observer.nodeFinished(node, execution);
         return;
@@ -597,6 +646,24 @@ export class GraphScheduler {
       } catch (error) {
         execution.status = "failed";
         execution.error = errorMessage(error);
+      }
+      // A patch draft in the outcome applies now — after node completion, a
+      // safe point — and before any successor activates. Both succeeded and
+      // failed outcomes may carry one (a failed node's patch is its failure
+      // recovery). Validation/authorization failures fail the node; a
+      // rejected patch never partially applies.
+      if (result.output.patch) {
+        try {
+          const applied = applyPlanPatch(plan, graph, node.id, result.output.patch);
+          this.database.savePatchedPlan(plan, applied.patch, {
+            removedNodeIds: applied.removedNodeIds,
+            changedNodes: applied.changedNodes,
+          });
+          this.observer.planUpdated(plan);
+        } catch (error) {
+          execution.status = "failed";
+          execution.error = errorMessage(error);
+        }
       }
     } catch (error) {
       if (attempt.cancelled || this.stopRequested) {
@@ -753,9 +820,51 @@ export class GraphScheduler {
     this.observer.nodeStarted(
       node,
       execution.visits,
-      this.nodeContext(graph, node),
+      this.nodeContext(plan, node),
     );
     this.observer.planUpdated(plan);
+  }
+
+  /**
+   * Roll back an applied patch as a new audited revision, using the
+   * persisted revision snapshots. Only the latest active patch can be rolled
+   * back; the runtime graph is re-derived from the base graph plus the
+   * remaining patch log on the next start/resume. Throws PlanPatchError on
+   * any violation; on success the rollback is persisted atomically (plan,
+   * rollback record, rolled-back marker, dropped node rows).
+   */
+  rollbackPatch(
+    graph: CompiledGraph,
+    plan: ExecutionPlan,
+    patchId: string,
+  ): AppliedPlanPatch {
+    const target = plan.patches.find((item) => item.id === patchId);
+    if (!target) {
+      throw new PlanPatchError([`Unknown patch ${patchId}.`]);
+    }
+    const base = this.database.getExecutionPlanRevision(
+      plan.runId,
+      target.baseRevision,
+    );
+    const applied = this.database.getExecutionPlanRevision(
+      plan.runId,
+      target.appliedRevision,
+    );
+    if (!base || !applied) {
+      throw new PlanPatchError([
+        `Plan revision history for run ${plan.runId} is unavailable; ` +
+          `cannot roll back ${patchId}.`,
+      ]);
+    }
+    const runtime = rebuildRuntimeGraph(graph, plan.patches);
+    const result = rollbackPlanPatch(plan, runtime, patchId, { base, applied });
+    this.database.savePatchedPlan(plan, result.patch, {
+      removedNodeIds: result.removedNodeIds,
+      changedNodes: result.changedNodes,
+      rolledBackPatchId: patchId,
+    });
+    this.observer.planUpdated(plan);
+    return result.patch;
   }
 
   // --- Persistence ----------------------------------------------------------

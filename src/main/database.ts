@@ -73,6 +73,12 @@ export class SpireDatabase {
         updated_at TEXT NOT NULL,
         json TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS plan_revisions (
+        run_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        json TEXT NOT NULL,
+        PRIMARY KEY (run_id, revision)
+      );
       CREATE TABLE IF NOT EXISTS node_executions (
         run_id TEXT NOT NULL,
         node_id TEXT NOT NULL,
@@ -298,6 +304,31 @@ export class SpireDatabase {
         validated.updatedAt,
         JSON.stringify(validated),
       );
+    // Keep the first write of every revision as its immutable snapshot.
+    // Topology is constant within a revision (only patches change it, and
+    // they bump the revision), so the snapshot is what rollback restores.
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO plan_revisions (run_id, revision, json)
+         VALUES (?, ?, ?)`,
+      )
+      .run(validated.runId, validated.revision, JSON.stringify(validated));
+  }
+
+  /**
+   * The immutable snapshot of a plan revision (first write wins), or
+   * undefined when the revision predates revision history.
+   */
+  getExecutionPlanRevision(
+    runId: string,
+    revision: number,
+  ): ExecutionPlan | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT json FROM plan_revisions WHERE run_id = ? AND revision = ?",
+      )
+      .get(runId, revision) as JsonRow | undefined;
+    return row ? executionPlanSchema.parse(JSON.parse(row.json)) : undefined;
   }
 
   getExecutionPlan(runId: string): ExecutionPlan | undefined {
@@ -400,6 +431,64 @@ export class SpireDatabase {
         )
         .all(runId) as JsonRow[]
     ).map((row) => appliedPlanPatchSchema.parse(JSON.parse(row.json)));
+  }
+
+  /**
+   * Persist a patch application atomically: the new plan revision, the patch
+   * audit row, deletion of execution rows for nodes the patch dropped,
+   * upserts of executions the patch changed, and — for rollbacks — the
+   * rolled-back marker on the original patch. Either every write lands or
+   * none does (a multi-operation patch never partially persists).
+   */
+  savePatchedPlan(
+    plan: ExecutionPlan,
+    patch: AppliedPlanPatch,
+    options: {
+      removedNodeIds?: string[];
+      changedNodes?: NodeExecution[];
+      rolledBackPatchId?: string;
+    } = {},
+  ): void {
+    this.db.transaction(() => {
+      this.saveExecutionPlan(plan);
+      this.savePlanPatch(plan.runId, patch);
+      for (const nodeId of options.removedNodeIds ?? []) {
+        this.db
+          .prepare(
+            "DELETE FROM node_executions WHERE run_id = ? AND node_id = ?",
+          )
+          .run(plan.runId, nodeId);
+      }
+      for (const node of options.changedNodes ?? []) {
+        this.saveNodeExecution(plan.runId, node);
+      }
+      if (options.rolledBackPatchId) {
+        this.markPlanPatchRolledBack(
+          plan.runId,
+          options.rolledBackPatchId,
+          patch.id,
+        );
+      }
+    })();
+  }
+
+  private markPlanPatchRolledBack(
+    runId: string,
+    patchId: string,
+    rolledBackBy: string,
+  ): void {
+    const row = this.db
+      .prepare("SELECT json FROM plan_patches WHERE run_id = ? AND id = ?")
+      .get(runId, patchId) as JsonRow | undefined;
+    if (!row) throw new Error(`Unknown plan patch ${patchId}.`);
+    const patch = {
+      ...(JSON.parse(row.json) as AppliedPlanPatch),
+      rolledBackBy,
+    };
+    const validated = appliedPlanPatchSchema.parse(patch);
+    this.db
+      .prepare("UPDATE plan_patches SET json = ? WHERE run_id = ? AND id = ?")
+      .run(JSON.stringify(validated), runId, patchId);
   }
 
   saveHarnessSession(session: HarnessSession): void {
