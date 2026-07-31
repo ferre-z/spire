@@ -1,18 +1,27 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type {
-  GraphDefinitionV2,
-  RunEvent,
-  RunRecord,
-  RunStatus,
-  StartRunInput,
+import {
+  graphDefinitionV2Schema,
+  type GraphDefinition,
+  type GraphDefinitionV2,
+  type RunEvent,
+  type RunRecord,
+  type RunStatus,
+  type StartRunInput,
 } from "../shared/domain";
-import type { ExecutionPlan, NodeExecution } from "../shared/execution";
+import type {
+  AppliedPlanPatch,
+  CollaborationMessageDraft,
+  ExecutionPlan,
+  NodeExecution,
+  PlanPatchDraft,
+} from "../shared/execution";
 import type { HarnessEvent, HarnessRegistry } from "../shared/harness";
 import type { JsonValue } from "../shared/workspace";
 import { CollaborationWorkspace } from "./collaboration/workspace";
+import type { CollaborationMessage } from "../shared/collaboration";
 import type { SpireDatabase } from "./database";
-import { migrateLegacyGraph } from "./graph-migration";
+import { readGraphDefinition } from "./graph-migration";
 import {
   compileExecutionPlan,
   compileGraph,
@@ -25,6 +34,11 @@ import {
   type ResumeOptions,
   type SchedulerObserver,
 } from "./scheduler/scheduler";
+import {
+  applyPlanPatch,
+  buildGraphVersionInput,
+  rollbackPlanPatch,
+} from "./scheduler/plan-patcher";
 import type { TraceJournal } from "./trace-journal";
 import { NodeWorkspaceCoordinator } from "./workspace/node-worktree";
 import type { ExecutionBackend } from "./worktree";
@@ -95,6 +109,8 @@ export class RunEngine {
   private live = new Map<string, RunRecord>();
   /** Per-run node workspace coordinators, keyed by run id. */
   private runWorkspaces = new Map<string, NodeWorkspaceCoordinator>();
+  /** Per-run collaboration workspaces, keyed by run id. */
+  private collaborationWorkspaces = new Map<string, CollaborationWorkspace>();
 
   constructor(
     private readonly database: SpireDatabase,
@@ -152,8 +168,15 @@ export class RunEngine {
       startedAt: new Date().toISOString(),
       events: [],
     };
-    this.database.saveGraph(input.graph);
-    const graph = migrateLegacyGraph(input.graph);
+    // readGraphDefinition normalizes both legacy v1 and native v2 graphs to
+    // v2 for compilation. Persist in the graph's native format so listGraphs
+    // (v1) and listGraphsV2 (v2) both round-trip correctly.
+    const graph = readGraphDefinition(input.graph);
+    if (graphDefinitionV2Schema.safeParse(input.graph).success) {
+      this.database.saveGraphV2(graph);
+    } else {
+      this.database.saveGraph(input.graph as GraphDefinition);
+    }
     // Persist the compiled plan before execution starts.
     const plan = this.compilePlan(graph, id);
     this.database.saveExecutionPlan(plan);
@@ -198,6 +221,162 @@ export class RunEngine {
       if (this.activeRunId === runId) this.activeRunId = undefined;
     });
     return run;
+  }
+
+  // --- External control-plane operations -------------------------------------
+
+  /**
+   * Get the persisted execution plan for a run, or throw if no plan exists.
+   * Returns the plan as last written by the scheduler (persisted after every
+   * node transition), so it reflects the latest durable state.
+   */
+  getExecutionPlan(runId: string): ExecutionPlan {
+    const plan = this.database.getExecutionPlan(runId);
+    if (!plan) throw new Error("Execution plan not found.");
+    return plan;
+  }
+
+  /**
+   * Deliver a collaboration message: persist it with the next sequence
+   * number, then deliver it to the run's collaboration workspace if one
+   * exists. Returns the fully-formed persisted message.
+   */
+  async deliverMessage(
+    runId: string,
+    draft: CollaborationMessageDraft,
+    senderNodeId: string,
+  ): Promise<CollaborationMessage> {
+    this.requireRun(runId);
+    const sequence = this.database.listCollaborationMessages(runId).length;
+    const message: CollaborationMessage = {
+      ...draft,
+      id: `${runId}:${sequence}`,
+      runId,
+      senderNodeId,
+      sequence,
+      createdAt: new Date().toISOString(),
+    };
+    this.database.appendCollaborationMessage(message);
+    const workspace = this.collaborationWorkspaces.get(runId);
+    if (workspace) {
+      await workspace.deliver(message);
+    }
+    return message;
+  }
+
+  /**
+   * Validate and apply a plan patch to a run's persisted execution plan.
+   * The actor node must have authority for every operation in the draft.
+   * On success the patched plan and audit record are persisted atomically.
+   */
+  applyPlanPatch(
+    runId: string,
+    actorNodeId: string,
+    draft: PlanPatchDraft,
+  ): AppliedPlanPatch {
+    const plan = this.getExecutionPlan(runId);
+    const compiled = this.compileFor(plan);
+    const result = applyPlanPatch(plan, compiled, actorNodeId, draft);
+    this.database.savePatchedPlan(plan, result.patch, {
+      removedNodeIds: result.removedNodeIds,
+      changedNodes: result.changedNodes,
+    });
+    return result.patch;
+  }
+
+  /**
+   * Roll back the most recent applied patch on a run's plan, restoring the
+   * pre-patch topology from revision snapshots. Only the latest active patch
+   * can be rolled back (stack semantics).
+   */
+  rollbackPlanPatch(runId: string, patchId: string): AppliedPlanPatch {
+    const plan = this.getExecutionPlan(runId);
+    const compiled = this.compileFor(plan);
+    const target = plan.patches.find((item) => item.id === patchId);
+    if (!target) {
+      throw new Error(`Unknown patch ${patchId}.`);
+    }
+    const base = this.database.getExecutionPlanRevision(
+      plan.runId,
+      target.baseRevision,
+    );
+    const applied = this.database.getExecutionPlanRevision(
+      plan.runId,
+      target.appliedRevision,
+    );
+    if (!base || !applied) {
+      throw new Error(
+        `Plan revision history for run ${plan.runId} is unavailable; ` +
+          `cannot roll back ${patchId}.`,
+      );
+    }
+    const result = rollbackPlanPatch(plan, compiled, patchId, { base, applied });
+    this.database.savePatchedPlan(plan, result.patch, {
+      removedNodeIds: result.removedNodeIds,
+      changedNodes: result.changedNodes,
+      rolledBackPatchId: patchId,
+    });
+    return result.patch;
+  }
+
+  /**
+   * Resume a run that is paused at a manual checkpoint. Passes the checkpoint,
+   * re-queues any checkpoint-gated nodes, and continues scheduling to a
+   * terminal state. Returns the final execution plan.
+   */
+  async resumeCheckpoint(runId: string): Promise<ExecutionPlan> {
+    if (this.activeRunId) throw new Error("Another run is active.");
+    const run = this.requireRun(runId);
+    if (run.status !== "needs_attention") {
+      throw new Error(
+        `Run ${runId} is not paused (status: ${run.status}).`,
+      );
+    }
+    let plan = this.database.getExecutionPlan(runId);
+    if (!plan) throw new Error("Execution plan not found.");
+    const compiled = this.compileFor(plan);
+    let scheduler = this.schedulers.get(runId);
+    if (!scheduler) {
+      scheduler = this.createScheduler(run, compiled);
+    }
+    this.activeRunId = runId;
+    this.live.set(runId, run);
+    plan = await scheduler.resume(compiled, plan);
+    await this.finishFromPlan(run, plan);
+    this.schedulers.delete(runId);
+    this.live.delete(runId);
+    this.runWorkspaces.delete(runId);
+    this.collaborationWorkspaces.delete(runId);
+    if (this.activeRunId === runId) this.activeRunId = undefined;
+    return plan;
+  }
+
+  /**
+   * Promote the live plan topology (active nodes and edges, minus superseded
+   * replacement nodes) to a new saved graph v2 version. The run's graph id and
+   * an incremented version are used; the caller may override the display name.
+   */
+  promotePlan(runId: string, name?: string): GraphDefinitionV2 {
+    const plan = this.getExecutionPlan(runId);
+    const compiled = this.compileFor(plan);
+    const promotion = buildGraphVersionInput(plan, compiled, { name });
+    const existing = this.database
+      .listGraphsV2()
+      .filter((item) => item.id === promotion.graphId);
+    const newVersion =
+      Math.max(0, ...existing.map((item) => item.version)) + 1;
+    const promoted: GraphDefinitionV2 = {
+      id: promotion.graphId,
+      name: promotion.name,
+      version: newVersion,
+      nodes: promotion.nodes,
+      edges: promotion.edges,
+      groups: promotion.groups,
+      maxSteps: promotion.maxSteps,
+      createdAt: new Date().toISOString(),
+    };
+    this.database.saveGraphV2(promoted);
+    return promoted;
   }
 
   // --- Run lifecycle --------------------------------------------------------
@@ -414,6 +593,9 @@ export class RunEngine {
           })),
         })
       : undefined;
+    if (this.userDataDir && collaboration) {
+      this.collaborationWorkspaces.set(run.id, collaboration);
+    }
     let workspaces: NodeWorkspaceCoordinator | undefined;
     if (this.userDataDir && run.artifacts?.worktreePath) {
       workspaces = new NodeWorkspaceCoordinator({

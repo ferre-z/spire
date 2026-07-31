@@ -15,9 +15,14 @@ import { IPC } from "../shared/api";
 import type { ControlOperationName } from "../shared/control";
 import type {
   GraphDefinition,
+  GraphDefinitionV2,
   OpenCodeStatus,
   RunRecord,
 } from "../shared/domain";
+import type {
+  CollaborationMessageDraft,
+  PlanPatchDraft,
+} from "../shared/execution";
 import type { TraceEvent } from "../shared/trace";
 import {
   WORKSPACE_LAYOUT_SCHEMA_VERSION,
@@ -474,6 +479,130 @@ describe("IPC adapter: malformed payloads are rejected", () => {
     await expect(
       invoke(IPC.connectOpenRouter, { apiKey: "   " }),
     ).rejects.toThrow(/api key/i);
+  });
+
+  it("rejects new corporate-workflow operations with malformed inputs", async () => {
+    setup();
+    // graphs.validate without a graph argument (undefined fails schema).
+    await expect(invoke(IPC.graphsValidate)).rejects.toThrow();
+    // Run-scoped operations with bad runId.
+    await expect(invoke(IPC.runsPlanGet, 123)).rejects.toThrow();
+    await expect(invoke(IPC.runsCheckpointResume, "")).rejects.toThrow();
+    await expect(
+      invoke(IPC.runsNodesList, { cursor: "c" }),
+    ).rejects.toThrow();
+    await expect(
+      invoke(IPC.runsMessagesList, {}),
+    ).rejects.toThrow();
+    // runs.messages.send missing required fields.
+    await expect(
+      invoke(IPC.runsMessagesSend, { runId: "run-1" }),
+    ).rejects.toThrow();
+    // runs.plan.patch missing required fields.
+    await expect(
+      invoke(IPC.runsPlanPatch, { runId: "run-1" }),
+    ).rejects.toThrow();
+    // runs.plan.rollback missing required fields.
+    await expect(
+      invoke(IPC.runsPlanRollback, { runId: 42 }),
+    ).rejects.toThrow();
+    // runs.plan.promote missing required fields.
+    await expect(invoke(IPC.runsPlanPromote, {})).rejects.toThrow();
+  });
+});
+
+describe("IPC adapter: corporate-workflow operations map through control", () => {
+  it("maps graphsValidate to graphs.validate and returns validation result", async () => {
+    const { executeSpy } = setup();
+    const result = (await invoke(IPC.graphsValidate, {
+      id: "g",
+      name: "G",
+      version: 1,
+    })) as Record<string, unknown>;
+    expect(executedCapabilities(executeSpy)).toEqual(["graphs.validate"]);
+    expect(result.valid).toBe(false);
+    expect(result.issues).toBeInstanceOf(Array);
+  });
+
+  it("maps runsPlanGet to runs.plan.get", async () => {
+    const { executeSpy } = setup();
+    await expect(invoke(IPC.runsPlanGet, "missing-run")).rejects.toThrow();
+    expect(executedCapabilities(executeSpy)).toEqual(["runs.plan.get"]);
+  });
+
+  it("maps runsNodesList to runs.nodes.list", async () => {
+    const { executeSpy } = setup();
+    await expect(
+      invoke(IPC.runsNodesList, { runId: "missing-run" }),
+    ).rejects.toThrow();
+    expect(executedCapabilities(executeSpy)).toEqual(["runs.nodes.list"]);
+  });
+
+  it("maps runsMessagesList to runs.messages.list", async () => {
+    const { executeSpy } = setup();
+    await expect(
+      invoke(IPC.runsMessagesList, { runId: "missing-run" }),
+    ).rejects.toThrow();
+    expect(executedCapabilities(executeSpy)).toEqual(["runs.messages.list"]);
+  });
+
+  it("maps runsMessagesSend to runs.messages.send", async () => {
+    const { executeSpy } = setup();
+    const input = {
+      runId: "missing-run",
+      recipient: { kind: "node", id: "impl" },
+      kind: "question",
+      subject: "Q",
+      body: "body",
+      artifactPaths: [],
+      senderNodeId: "user",
+    };
+    await expect(invoke(IPC.runsMessagesSend, input)).rejects.toThrow();
+    expect(executedCapabilities(executeSpy)).toEqual(["runs.messages.send"]);
+  });
+
+  it("maps runsPlanPatch to runs.plan.patch", async () => {
+    const { executeSpy } = setup();
+    const input = {
+      runId: "missing-run",
+      actorNodeId: "planner",
+      draft: {
+        baseRevision: 0,
+        reason: "test",
+        operations: [{ action: "skip", nodeId: "impl" }],
+      },
+    };
+    await expect(invoke(IPC.runsPlanPatch, input)).rejects.toThrow();
+    expect(executedCapabilities(executeSpy)).toEqual(["runs.plan.patch"]);
+  });
+
+  it("maps runsPlanRollback to runs.plan.rollback", async () => {
+    const { executeSpy } = setup();
+    await expect(
+      invoke(IPC.runsPlanRollback, {
+        runId: "missing-run",
+        patchId: "patch-1",
+      }),
+    ).rejects.toThrow();
+    expect(executedCapabilities(executeSpy)).toEqual(["runs.plan.rollback"]);
+  });
+
+  it("maps runsCheckpointResume to runs.checkpoint.resume", async () => {
+    const { executeSpy } = setup();
+    await expect(
+      invoke(IPC.runsCheckpointResume, "missing-run"),
+    ).rejects.toThrow();
+    expect(executedCapabilities(executeSpy)).toEqual([
+      "runs.checkpoint.resume",
+    ]);
+  });
+
+  it("maps runsPlanPromote to runs.plan.promote", async () => {
+    const { executeSpy } = setup();
+    await expect(
+      invoke(IPC.runsPlanPromote, { runId: "missing-run" }),
+    ).rejects.toThrow();
+    expect(executedCapabilities(executeSpy)).toEqual(["runs.plan.promote"]);
   });
 });
 

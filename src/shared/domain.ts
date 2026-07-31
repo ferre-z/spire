@@ -341,7 +341,7 @@ export type AppSnapshot = {
 };
 
 export type StartRunInput = {
-  graph: GraphDefinition;
+  graph: GraphDefinition | GraphDefinitionV2;
   repositoryPath: string;
   goal: string;
 };

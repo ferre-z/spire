@@ -1,10 +1,26 @@
 import type {
   AppSnapshot,
   GraphDefinition,
+  GraphDefinitionV2,
   ProviderInput,
   RunEvent,
   StartRunInput,
 } from "./domain";
+import type {
+  AppliedPlanPatch,
+  ExecutionPlan,
+} from "./execution";
+import type {
+  GraphValidation,
+  MessagePage,
+  NodeExecutionPage,
+  PlanPatchInput,
+  PlanPromoteInput,
+  PlanRollbackInput,
+  RunScopedPageInput,
+  SendMessageInput,
+  SentMessage,
+} from "./control";
 import type { TraceEvent, TraceFilter, TracePage } from "./trace";
 import type {
   WorkspaceEnvironment,
@@ -33,6 +49,15 @@ export interface SpireApi {
   queryTraces(filter: TraceFilter): Promise<TracePage>;
   onRunEvent(listener: (event: RunEvent) => void): Unsubscribe;
   onTraceEvent(listener: (event: TraceEvent) => void): Unsubscribe;
+  graphsValidate(graph: Record<string, unknown>): Promise<GraphValidation>;
+  runsPlanGet(runId: string): Promise<ExecutionPlan>;
+  runsNodesList(input: RunScopedPageInput): Promise<NodeExecutionPage>;
+  runsMessagesList(input: RunScopedPageInput): Promise<MessagePage>;
+  runsMessagesSend(input: SendMessageInput): Promise<SentMessage>;
+  runsPlanPatch(input: PlanPatchInput): Promise<AppliedPlanPatch>;
+  runsPlanRollback(input: PlanRollbackInput): Promise<AppliedPlanPatch>;
+  runsCheckpointResume(runId: string): Promise<ExecutionPlan>;
+  runsPlanPromote(input: PlanPromoteInput): Promise<GraphDefinitionV2>;
 }
 
 export const IPC = {
@@ -55,4 +80,13 @@ export const IPC = {
   queryTraces: "spire:query-traces",
   runEvent: "spire:run-event",
   traceEvent: "spire:trace-event",
+  graphsValidate: "spire:graphs-validate",
+  runsPlanGet: "spire:runs-plan-get",
+  runsNodesList: "spire:runs-nodes-list",
+  runsMessagesList: "spire:runs-messages-list",
+  runsMessagesSend: "spire:runs-messages-send",
+  runsPlanPatch: "spire:runs-plan-patch",
+  runsPlanRollback: "spire:runs-plan-rollback",
+  runsCheckpointResume: "spire:runs-checkpoint-resume",
+  runsPlanPromote: "spire:runs-plan-promote",
 } as const;
