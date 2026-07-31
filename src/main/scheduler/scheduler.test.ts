@@ -1010,4 +1010,47 @@ describe("GraphScheduler collaboration and workspaces", () => {
       "skipped",
     );
   });
+
+  it("serializes message delivery so concurrent nodes get unique chronological sequences", async () => {
+    // Two seed nodes run concurrently; "a" emits two drafts, "b" one. The
+    // deliver stub yields a macrotask per call, so without serialization
+    // node's a read-count → append → deliver sequence interleaves with b's
+    // and a's second draft reuses b's sequence (duplicate <runId>:<seq>).
+    const adapter = new FakeAdapter("opencode", [
+      {
+        ...ok("a done"),
+        messages: [
+          handoffMessage({ kind: "node", id: "b" }, "a-first"),
+          handoffMessage({ kind: "node", id: "b" }, "a-second"),
+        ],
+      },
+      { ...ok("b done"), messages: [handoffMessage({ kind: "node", id: "a" }, "b-only")] },
+    ]);
+    const definition = graph([agent("a"), agent("b")], []);
+    const userDataDir = await mkdtemp(path.join(tmpdir(), "spire-collab-"));
+    const collaboration = collaborationFor(userDataDir, definition);
+    const delivered: number[] = [];
+    vi.spyOn(collaboration, "deliver").mockImplementation(async (message) => {
+      delivered.push(message.sequence);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return [];
+    });
+    const { scheduler, compiled, plan, database } = setup(
+      definition,
+      adapter,
+      "run-1",
+      { collaboration },
+    );
+    const final = await scheduler.start(compiled, plan);
+
+    expect(final.status).toBe("succeeded");
+    // Exactly one deliver per draft, with unique monotonic sequences.
+    expect(delivered).toHaveLength(3);
+    const persisted = database.listCollaborationMessages("run-1");
+    expect(persisted).toHaveLength(3);
+    expect(persisted.map((message) => message.sequence)).toEqual([0, 1, 2]);
+    expect(new Set(persisted.map((message) => message.id)).size).toBe(3);
+    expect([...delivered].sort((x, y) => x - y)).toEqual([0, 1, 2]);
+    database.close();
+  });
 });

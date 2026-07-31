@@ -623,15 +623,38 @@ export class GraphScheduler {
   }
 
   /**
-   * Persist an outcome's collaboration drafts (database first, then the
-   * Markdown inboxes) with run-scoped chronological sequences.
+   * Per-run delivery queue. A scheduler instance drives exactly one run, and
+   * sequences are allocated from the persisted message count, so the whole
+   * read-count → append → deliver sequence for one node's drafts must
+   * complete before another node's begins — otherwise two nodes completing
+   * concurrently interleave and allocate duplicate `<runId>:<seq>` ids.
    */
-  private async deliverMessages(
+  private deliveryQueue: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Persist an outcome's collaboration drafts (database first, then the
+   * Markdown inboxes) with run-scoped chronological sequences. Serialized
+   * per run; errors still propagate to the caller (node failure) without
+   * poisoning the queue.
+   */
+  private deliverMessages(
     plan: ExecutionPlan,
     node: CompiledNode,
     drafts: CollaborationMessageDraft[],
   ): Promise<void> {
-    if (drafts.length === 0) return;
+    if (drafts.length === 0) return Promise.resolve();
+    const delivery = this.deliveryQueue.then(() =>
+      this.deliverMessagesNow(plan, node, drafts),
+    );
+    this.deliveryQueue = delivery.catch(() => undefined);
+    return delivery;
+  }
+
+  private async deliverMessagesNow(
+    plan: ExecutionPlan,
+    node: CompiledNode,
+    drafts: CollaborationMessageDraft[],
+  ): Promise<void> {
     let sequence = this.database.listCollaborationMessages(plan.runId).length;
     for (const draft of drafts) {
       const message: CollaborationMessage = {
