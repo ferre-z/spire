@@ -41,6 +41,8 @@ describe("default layout models", () => {
       "graph-settings",
       "node-inspector",
       "runtime-policy",
+      "collaboration",
+      "harnesses",
     ]);
     expect(right.children[1].children.map((t) => t.id)).toEqual([
       "live-stream",
@@ -62,6 +64,8 @@ describe("default layout models", () => {
       "graph-settings",
       "node-inspector",
       "runtime-policy",
+      "collaboration",
+      "harnesses",
       "live-stream",
       "diff",
       "result",
@@ -93,9 +97,9 @@ describe("default layout models", () => {
 });
 
 describe("panel registry", () => {
-  it("registers all ten workspace panes", () => {
-    expect(PANE_IDS).toHaveLength(10);
-    expect(new Set(PANE_IDS).size).toBe(10);
+  it("registers all twelve workspace panes", () => {
+    expect(PANE_IDS).toHaveLength(12);
+    expect(new Set(PANE_IDS).size).toBe(12);
   });
 
   it("provides complete metadata for every pane", () => {

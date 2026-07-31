@@ -10,6 +10,8 @@ import { RuntimePolicyPane } from "../panes/RuntimePolicyPane";
 import { LiveStreamPane } from "../panes/LiveStreamPane";
 import { DiffPane } from "../panes/DiffPane";
 import { ResultPane } from "../panes/ResultPane";
+import { CollaborationPane } from "../panes/CollaborationPane";
+import { HarnessesPane } from "../panes/HarnessesPane";
 
 const PANE_RENDERERS: Record<PaneId, () => ReactNode> = {
   "graph-library": () => <GraphLibraryPane />,
@@ -20,6 +22,8 @@ const PANE_RENDERERS: Record<PaneId, () => ReactNode> = {
   "node-inspector": () => <NodeInspectorPane />,
   "runtime-policy": () => <RuntimePolicyPane />,
   "live-stream": () => <LiveStreamPane />,
+  collaboration: () => <CollaborationPane />,
+  harnesses: () => <HarnessesPane />,
   diff: () => <DiffPane />,
   result: () => <ResultPane />,
 };

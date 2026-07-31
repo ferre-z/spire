@@ -76,8 +76,8 @@ const GLOBAL_ATTRIBUTES: Record<string, unknown> = {
  * Desktop (>= 1100px):
  * - left column: Graph Library over Run History
  * - center: Graph Canvas over Task Launcher
- * - right column: Graph Settings / Node Inspector / Runtime Policy tabbed
- *   over Live Stream / Diff / Result tabbed
+ * - right column: Graph Settings / Node Inspector / Runtime Policy /
+ *   Collaboration / Harnesses tabbed, over Live Stream / Diff / Result tabbed
  */
 export function defaultDesktopLayout(): DefaultLayoutModel {
   return {
@@ -107,7 +107,13 @@ export function defaultDesktopLayout(): DefaultLayoutModel {
           children: [
             tabSet(
               "ts-config",
-              ["graph-settings", "node-inspector", "runtime-policy"],
+              [
+                "graph-settings",
+                "node-inspector",
+                "runtime-policy",
+                "collaboration",
+                "harnesses",
+              ],
               50,
             ),
             tabSet("ts-output", ["live-stream", "diff", "result"], 50),
@@ -153,6 +159,8 @@ export function defaultCompactLayout(): DefaultLayoutModel {
               "graph-settings",
               "node-inspector",
               "runtime-policy",
+              "collaboration",
+              "harnesses",
               "live-stream",
               "diff",
               "result",

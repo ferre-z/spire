@@ -11,6 +11,8 @@ export const PANE_IDS = [
   "node-inspector",
   "runtime-policy",
   "live-stream",
+  "collaboration",
+  "harnesses",
   "diff",
   "result",
 ] as const;
@@ -83,6 +85,20 @@ export const PANE_META: Record<PaneId, PaneMeta> = {
     title: "Live Stream",
     popoutMinWidth: 360,
     popoutMinHeight: 300,
+  },
+  collaboration: {
+    id: "collaboration",
+    component: "collaboration",
+    title: "Collaboration",
+    popoutMinWidth: 360,
+    popoutMinHeight: 320,
+  },
+  harnesses: {
+    id: "harnesses",
+    component: "harnesses",
+    title: "Harness connections",
+    popoutMinWidth: 300,
+    popoutMinHeight: 320,
   },
   diff: {
     id: "diff",

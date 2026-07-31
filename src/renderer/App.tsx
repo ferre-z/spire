@@ -19,7 +19,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useAppStore } from "./store";
+import { isGraphV2, useAppStore } from "./store";
 import { Onboarding } from "./components/Onboarding";
 import { Brand } from "./components/Brand";
 import { WorkspaceLayout } from "./workspace/WorkspaceLayout";
@@ -96,7 +96,10 @@ export function App() {
             <strong>{graph.nodes.length}</strong> AGENTS
           </span>
           <span>
-            <strong>{graph.maxIterations}</strong> MAX PASSES
+            <strong>
+              {isGraphV2(graph) ? graph.maxSteps : graph.maxIterations}
+            </strong>{" "}
+            MAX PASSES
           </span>
           <span className="local-status">
             <i /> LOCAL
