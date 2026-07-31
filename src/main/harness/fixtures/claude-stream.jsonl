@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"sess-claude-1","model":"claude-sonnet-5","tools":["Read","Grep","Glob"],"cwd":"/tmp/work"}
+{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"thinking","thinking":"Let me inspect the repository first.","signature":"sig_1"},{"type":"text","text":"Looking at the files now."}]}}
+{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Grep","input":{"pattern":"TODO","path":"/tmp/work"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"src/a.ts:1: TODO"}]}}
+{"type":"assistant","message":{"id":"msg_2","role":"assistant","content":[{"type":"text","text":"{\"status\":\"succeeded\",\"summary\":\"done\"}"}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1200,"session_id":"sess-claude-1","total_cost_usd":0.002,"usage":{"input_tokens":120,"output_tokens":45,"cache_read_input_tokens":30,"cache_creation_input_tokens":10},"structured_output":{"status":"succeeded","summary":"done"},"result":"{\"status\":\"succeeded\",\"summary\":\"done\"}"}

@@ -5,7 +5,7 @@ import { ControlSocketServer } from "./control/socket-server";
 import { SpireControl } from "./control/spire-control";
 import { SpireDatabase } from "./database";
 import { detectEnvironment, registerIpc, sendRunEvent } from "./ipc";
-import { OpenCodeHarness } from "./opencode";
+import { OpenCodeHarness } from "./harness/opencode";
 import { RunEngine } from "./run-engine";
 import { isAllowedPopoutUrl } from "./window-policy";
 import { LocalWorktreeBackend } from "./worktree";

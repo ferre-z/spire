@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentNode,
   GraphDefinition,
+  LegacyAgentNode,
   RunEvent,
   RunRecord,
   RunStatus,
@@ -15,7 +15,7 @@ import {
 } from "../shared/domain";
 import type { JsonValue } from "../shared/workspace";
 import type { SpireDatabase } from "./database";
-import type { AgentHarness, HarnessPrompt } from "./opencode";
+import type { AgentHarness, HarnessPrompt } from "./harness/opencode";
 import type { TraceJournal } from "./trace-journal";
 import {
   implementationPrompt,
@@ -266,7 +266,7 @@ export class RunEngine {
 
   private async structuredPrompt<T>(
     run: RunRecord,
-    node: AgentNode,
+    node: LegacyAgentNode,
     phase: Extract<RunStatus, "planning" | "implementing" | "reviewing">,
     system: string,
     prompt: string,
@@ -297,7 +297,7 @@ export class RunEngine {
 
   private async send(
     run: RunRecord,
-    node: AgentNode,
+    node: LegacyAgentNode,
     phase: string,
     system: string,
     prompt: string,

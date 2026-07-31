@@ -13,7 +13,7 @@ import type {
   AgentHarness,
   HarnessPrompt,
   HarnessResponse,
-} from "../opencode";
+} from "../harness/opencode";
 import type { OpenCodeStatus } from "../../shared/domain";
 import { RunEngine } from "../run-engine";
 import type { ExecutionBackend, PreparedWorkspace } from "../worktree";

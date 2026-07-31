@@ -30,7 +30,7 @@ import type {
   AgentHarness,
   HarnessPrompt,
   HarnessResponse,
-} from "./opencode";
+} from "./harness/opencode";
 import { RunEngine } from "./run-engine";
 import type { ExecutionBackend, PreparedWorkspace } from "./worktree";
 

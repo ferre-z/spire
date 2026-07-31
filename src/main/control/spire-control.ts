@@ -29,7 +29,7 @@ import type { TraceCursor, TraceFilter, TraceListener, TracePage } from "../../s
 import type { JsonValue, WorkspaceLayoutRecord } from "../../shared/workspace";
 import { validateWorkspaceLayoutRecord } from "../../shared/workspace";
 import type { SpireDatabase } from "../database";
-import type { AgentHarness } from "../opencode";
+import type { AgentHarness } from "../harness/opencode";
 import type { RunEngine } from "../run-engine";
 import type { TraceJournal } from "../trace-journal";
 import type { ExecutionBackend } from "../worktree";

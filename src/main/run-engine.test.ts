@@ -8,7 +8,7 @@ import type {
   AgentHarness,
   HarnessPrompt,
   HarnessResponse,
-} from "./opencode";
+} from "./harness/opencode";
 import { RunEngine } from "./run-engine";
 import { REDACTED, type TraceJournal } from "./trace-journal";
 import type { ExecutionBackend, PreparedWorkspace } from "./worktree";
