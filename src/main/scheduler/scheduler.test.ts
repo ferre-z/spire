@@ -1,3 +1,8 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AgentNode,
@@ -19,8 +24,16 @@ import type {
 } from "../../shared/harness";
 import { SpireDatabase } from "../database";
 import { createHarnessRegistry } from "../harness/registry";
+import { CollaborationWorkspace } from "../collaboration/workspace";
+import { NodeWorkspaceCoordinator } from "../workspace/node-worktree";
 import { compileExecutionPlan, compileGraph } from "./graph-compiler";
-import { GraphScheduler, type SchedulerObserver } from "./scheduler";
+import {
+  GraphScheduler,
+  type GraphSchedulerDeps,
+  type SchedulerObserver,
+} from "./scheduler";
+
+const exec = promisify(execFile);
 
 // --- Fixtures ---------------------------------------------------------------
 
@@ -105,6 +118,8 @@ function graph(
 type FakeAdapterOptions = {
   hang?: boolean;
   skipSession?: boolean;
+  /** Side effect performed mid-run (e.g. writing into the node directory). */
+  sideEffect?: (input: HarnessRunInput) => Promise<void> | void;
 };
 
 class FakeAdapter implements HarnessAdapter {
@@ -141,7 +156,10 @@ class FakeAdapter implements HarnessAdapter {
     input.onEvent({ type: "tool_result", tool: "fake", output: "done" });
     const output = this.outputs[this.index] ?? ok(`output-${this.index}`);
     this.index += 1;
-    return Promise.resolve({ session: ref, output });
+    return Promise.resolve(this.options.sideEffect?.(input)).then(() => ({
+      session: ref,
+      output,
+    }));
   }
   async abort(session: HarnessSessionRef): Promise<void> {
     this.abortCalls.push(session);
@@ -164,6 +182,12 @@ function setup(
   definition: GraphDefinitionV2,
   adapter: FakeAdapter,
   runId = "run-1",
+  extras: Partial<
+    Pick<
+      GraphSchedulerDeps,
+      "collaboration" | "workspaces" | "directory" | "goal"
+    >
+  > = {},
 ) {
   const database = new SpireDatabase(":memory:");
   const registry = createHarnessRegistry([adapter]);
@@ -171,9 +195,11 @@ function setup(
   const scheduler = new GraphScheduler({
     database,
     registry,
-    goal: "test goal",
-    directory: "/tmp/worktree",
+    goal: extras.goal ?? "test goal",
+    directory: extras.directory ?? "/tmp/worktree",
     observer: obs,
+    collaboration: extras.collaboration,
+    workspaces: extras.workspaces,
   });
   const compiled = compileGraph(definition);
   const plan = compileExecutionPlan(definition, runId);
@@ -688,6 +714,300 @@ describe("GraphScheduler", () => {
         status: "succeeded",
         outcome: expect.objectContaining({ status: "succeeded" }),
       }),
+    );
+  });
+});
+
+// --- Collaboration + workspace wiring ----------------------------------------
+
+function handoffMessage(
+  recipient: NodeOutcome["messages"][number]["recipient"],
+  subject: string,
+): NodeOutcome["messages"][number] {
+  return { recipient, kind: "handoff", subject, body: `body: ${subject}`, artifactPaths: [] };
+}
+
+function collaborationFor(
+  userDataDir: string,
+  definition: GraphDefinitionV2,
+  runId = "run-1",
+): CollaborationWorkspace {
+  return new CollaborationWorkspace({
+    userDataDir,
+    runId,
+    goal: "test goal",
+    nodes: definition.nodes.map((node) => ({
+      id: node.id,
+      name: node.name,
+      groupId: node.groupId,
+    })),
+    edges: definition.edges.map((item) => ({
+      source: item.source,
+      target: item.target,
+    })),
+  });
+}
+
+/** A real source repo + integration worktree, as RunEngine would prepare. */
+async function gitSetup(runId: string) {
+  const root = await mkdtemp(path.join(tmpdir(), "spire-sched-git-"));
+  const repository = path.join(root, "repository");
+  await mkdir(repository);
+  await exec("git", ["init", "-b", "main"], { cwd: repository });
+  await exec("git", ["config", "user.email", "spire@example.test"], {
+    cwd: repository,
+  });
+  await exec("git", ["config", "user.name", "Spire Test"], { cwd: repository });
+  await mkdir(path.join(repository, "src"));
+  await writeFile(path.join(repository, "README.md"), "# Fixture\n");
+  await writeFile(path.join(repository, "src", "a.ts"), "export const a = 1;\n");
+  await writeFile(path.join(repository, "shared.txt"), "line\n");
+  await exec("git", ["add", "."], { cwd: repository });
+  await exec("git", ["commit", "-m", "fixture"], { cwd: repository });
+  const integrationPath = path.join(root, "integration");
+  const integrationBranch = `spire/run-${runId}`;
+  await exec(
+    "git",
+    ["worktree", "add", "-b", integrationBranch, integrationPath, "HEAD"],
+    { cwd: repository },
+  );
+  const coordinator = new NodeWorkspaceCoordinator({
+    repositoryPath: repository,
+    integrationPath,
+    integrationBranch,
+    runId,
+    rootDir: path.join(root, "nodes"),
+  });
+  return { root, repository, integrationPath, coordinator };
+}
+
+describe("GraphScheduler collaboration and workspaces", () => {
+  it("delivers outcome messages to inboxes and the database", async () => {
+    const adapter = new FakeAdapter("opencode", [
+      { ...ok("a done"), messages: [handoffMessage({ kind: "node", id: "b" }, "Handoff notes")] },
+      ok("b done"),
+    ]);
+    const definition = graph(
+      [agent("a"), agent("b")],
+      [edge("ab", "a", "b")],
+    );
+    const userDataDir = await mkdtemp(path.join(tmpdir(), "spire-collab-"));
+    const collaboration = collaborationFor(userDataDir, definition);
+    const { scheduler, compiled, plan, database } = setup(
+      definition,
+      adapter,
+      "run-1",
+      { collaboration },
+    );
+    const final = await scheduler.start(compiled, plan);
+
+    expect(final.status).toBe("succeeded");
+    const persisted = database.listCollaborationMessages("run-1");
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({
+      senderNodeId: "a",
+      sequence: 0,
+      subject: "Handoff notes",
+    });
+    const inbox = await readFile(
+      path.join(collaboration.root, "inbox", "b.md"),
+      "utf8",
+    );
+    expect(inbox).toContain("Handoff notes");
+    database.close();
+  });
+
+  it("feeds a context packet with routing choices into HarnessRunInput.context", async () => {
+    const adapter = new FakeAdapter("opencode", [
+      { ...ok("a done"), messages: [handoffMessage({ kind: "successors" }, "Notes for b")] },
+      ok("b done"),
+    ]);
+    const definition = graph(
+      [agent("a"), decision("b"), agent("c")],
+      [
+        edge("ab", "a", "b"),
+        { ...edge("e1", "b", "c", "selected"), label: "Continue" },
+      ],
+    );
+    const userDataDir = await mkdtemp(path.join(tmpdir(), "spire-collab-"));
+    const collaboration = collaborationFor(userDataDir, definition);
+    const { scheduler, compiled, plan } = setup(definition, adapter, "run-1", {
+      collaboration,
+    });
+    const final = await scheduler.start(compiled, plan);
+    expect(final.status).toBe("succeeded");
+
+    const bCall = adapter.calls.find((call) => call.nodeId === "b")!;
+    // Context packet content.
+    expect(bCall.context).toContain("test goal"); // run objective
+    expect(bCall.context).toContain("job-b"); // node job
+    expect(bCall.context).toContain("Notes for b"); // incoming message
+    expect(bCall.context).toContain("a done"); // predecessor output
+    // The Task 5 routing section survives inside the packet context.
+    expect(bCall.context).toContain('"e1" (Continue)');
+    expect(bCall.context).toContain("selectedEdgeIds");
+  });
+
+  it("runs workspace-write nodes isolated and merges at a checkpoint", async () => {
+    const runId = "run-iso";
+    const { integrationPath, coordinator } = await gitSetup(runId);
+    const adapter = new FakeAdapter("opencode", [ok("wrote"), ok("read")], {
+      sideEffect: async (input) => {
+        if (input.nodeId === "writer") {
+          await writeFile(
+            path.join(input.directory, "src", "a.ts"),
+            "export const a = 2;\n",
+          );
+        }
+      },
+    });
+    const definition = graph(
+      [
+        agent("writer", {
+          access: { mode: "workspace-write", writeScopes: ["src"] },
+        }),
+        checkpoint("gate", "automatic"),
+        agent("reader"),
+      ],
+      [edge("wg", "writer", "gate"), edge("gr", "gate", "reader")],
+    );
+    const { scheduler, compiled, plan } = setup(definition, adapter, runId, {
+      directory: integrationPath,
+      workspaces: coordinator,
+    });
+    const final = await scheduler.start(compiled, plan);
+
+    expect(final.status).toBe("succeeded");
+    const writerCall = adapter.calls.find((call) => call.nodeId === "writer")!;
+    const readerCall = adapter.calls.find((call) => call.nodeId === "reader")!;
+    // The writer ran in its own worktree; the read-only reader in the run's.
+    expect(writerCall.directory).not.toBe(integrationPath);
+    expect(readerCall.directory).toBe(integrationPath);
+    // The checkpoint merged the writer's branch into the integration branch.
+    expect(
+      await readFile(path.join(integrationPath, "src", "a.ts"), "utf8"),
+    ).toBe("export const a = 2;\n");
+    const diff = await coordinator.finalDiff();
+    expect(diff.changedFiles).toEqual(["src/a.ts"]);
+  });
+
+  it("converts scope violations into node failures eligible for failure routing", async () => {
+    const runId = "run-scope";
+    const { integrationPath, coordinator } = await gitSetup(runId);
+    const adapter = new FakeAdapter("opencode", [ok("wrote"), ok("handled")], {
+      sideEffect: async (input) => {
+        if (input.nodeId === "writer") {
+          await writeFile(path.join(input.directory, "README.md"), "# Pwned\n");
+        }
+      },
+    });
+    const definition = graph(
+      [
+        agent("writer", {
+          access: { mode: "workspace-write", writeScopes: ["src"] },
+        }),
+        agent("handler"),
+      ],
+      [edge("wh", "writer", "handler", "failure")],
+    );
+    const { scheduler, compiled, plan } = setup(definition, adapter, runId, {
+      directory: integrationPath,
+      workspaces: coordinator,
+    });
+    const final = await scheduler.start(compiled, plan);
+
+    const writer = final.nodes.find((node) => node.nodeId === "writer")!;
+    expect(writer.status).toBe("failed");
+    expect(writer.error).toMatch(/write scopes/);
+    expect(writer.error).toContain("README.md");
+    // The failure routed to the handler, so the plan still succeeds — and
+    // the out-of-scope edit never reached the integration worktree.
+    expect(nodeIds(adapter)).toEqual(["writer", "handler"]);
+    expect(final.status).toBe("succeeded");
+    expect(await readFile(path.join(integrationPath, "README.md"), "utf8")).toBe(
+      "# Fixture\n",
+    );
+  });
+
+  it("converts checkpoint merge conflicts into node failures", async () => {
+    const runId = "run-conflict";
+    const { integrationPath, coordinator } = await gitSetup(runId);
+    const adapter = new FakeAdapter(
+      "opencode",
+      [ok("first"), ok("second")],
+      {
+        sideEffect: async (input) => {
+          if (input.nodeId !== "w-first" && input.nodeId !== "w-second") return;
+          const content = input.nodeId === "w-first" ? "first\n" : "second\n";
+          await writeFile(path.join(input.directory, "shared.txt"), content);
+        },
+      },
+    );
+    const writeAccess = {
+      mode: "workspace-write" as const,
+      writeScopes: ["shared.txt"],
+    };
+    const definition = graph(
+      [
+        agent("w-first", { access: writeAccess }),
+        agent("w-second", { access: writeAccess }),
+        checkpoint("gate", "automatic"),
+        agent("handler"),
+      ],
+      [
+        edge("fg", "w-first", "gate"),
+        edge("sg", "w-second", "gate"),
+        edge("sh", "w-second", "handler", "failure"),
+      ],
+    );
+    const { scheduler, compiled, plan } = setup(definition, adapter, runId, {
+      directory: integrationPath,
+      workspaces: coordinator,
+    });
+    const final = await scheduler.start(compiled, plan);
+
+    // Node-id order: w-first merged, w-second conflicted and failed.
+    expect(
+      final.nodes.find((node) => node.nodeId === "w-first")?.status,
+    ).toBe("succeeded");
+    const second = final.nodes.find((node) => node.nodeId === "w-second")!;
+    expect(second.status).toBe("failed");
+    expect(second.error).toMatch(/merge conflict/i);
+    expect(second.error).toContain("shared.txt");
+    expect(
+      await readFile(path.join(integrationPath, "shared.txt"), "utf8"),
+    ).toBe("first\n");
+    // The conflict failure is eligible for failure routing: the handler on
+    // w-second's failure edge ran, so the plan settles succeeded.
+    expect(nodeIds(adapter)).toContain("handler");
+    expect(final.status).toBe("succeeded");
+  });
+
+  it("converts collaboration delivery failures into node failures without crashing", async () => {
+    const adapter = new FakeAdapter("opencode", [
+      { ...ok("a done"), messages: [handoffMessage({ kind: "node", id: "b" }, "Doomed")] },
+    ]);
+    const definition = graph(
+      [agent("a"), agent("b")],
+      [edge("ab", "a", "b", "success")],
+    );
+    const userDataDir = await mkdtemp(path.join(tmpdir(), "spire-collab-"));
+    const collaboration = collaborationFor(userDataDir, definition);
+    vi.spyOn(collaboration, "deliver").mockRejectedValue(
+      new Error("disk full"),
+    );
+    const { scheduler, compiled, plan } = setup(definition, adapter, "run-1", {
+      collaboration,
+    });
+    const final = await scheduler.start(compiled, plan);
+
+    const a = final.nodes.find((node) => node.nodeId === "a")!;
+    expect(a.status).toBe("failed");
+    expect(a.error).toBe("disk full");
+    // No failure routing out of "a": the plan fails and b settles skipped.
+    expect(final.status).toBe("failed");
+    expect(final.nodes.find((node) => node.nodeId === "b")?.status).toBe(
+      "skipped",
     );
   });
 });

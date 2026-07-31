@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { CollaborationMessage } from "../../shared/collaboration";
 import type {
   AgentNode,
   CheckpointNode,
@@ -6,6 +7,7 @@ import type {
 } from "../../shared/domain";
 import {
   nodeOutcomeSchema,
+  type CollaborationMessageDraft,
   type ExecutionPlan,
   type NodeExecution,
   type NodeOutcome,
@@ -16,8 +18,10 @@ import type {
   HarnessSession,
   HarnessSessionRef,
 } from "../../shared/harness";
+import type { CollaborationWorkspace } from "../collaboration/workspace";
 import type { SpireDatabase } from "../database";
 import { runHarnessStructured } from "../harness/adapter";
+import type { NodeWorkspaceCoordinator } from "../workspace/node-worktree";
 import type { CompiledGraph, CompiledNode } from "./graph-compiler";
 
 /**
@@ -54,6 +58,18 @@ export type GraphSchedulerDeps = {
   /** Node working directory (the run's integration worktree). */
   directory: string;
   observer: SchedulerObserver;
+  /**
+   * App-managed Markdown collaboration space. When present, outcome messages
+   * are delivered to per-node inboxes and each agent-like node's context is
+   * its assembled context packet (plus the routing section).
+   */
+  collaboration?: CollaborationWorkspace;
+  /**
+   * Per-node workspace isolation. When present, workspace-write nodes run in
+   * private node worktrees that merge into the integration branch at
+   * checkpoints; scope violations and merge conflicts become node failures.
+   */
+  workspaces?: NodeWorkspaceCoordinator;
 };
 
 export type ResumeOptions = {
@@ -89,6 +105,8 @@ export class GraphScheduler {
   private readonly goal: string;
   private readonly directory: string;
   private readonly observer: SchedulerObserver;
+  private readonly collaboration?: CollaborationWorkspace;
+  private readonly workspaces?: NodeWorkspaceCoordinator;
   private readonly inFlight = new Set<InFlightAttempt>();
   private stopRequested = false;
 
@@ -98,6 +116,8 @@ export class GraphScheduler {
     this.goal = deps.goal;
     this.directory = deps.directory;
     this.observer = deps.observer;
+    this.collaboration = deps.collaboration;
+    this.workspaces = deps.workspaces;
   }
 
   /**
@@ -140,7 +160,7 @@ export class GraphScheduler {
         node.kind === "checkpoint"
       ) {
         // A manual checkpoint the user chose to resume past.
-        this.completeCheckpoint(execution, node);
+        await this.passCheckpoint(plan, execution, node);
         this.persistNode(plan, execution);
       } else if (
         options.retryFailed &&
@@ -382,20 +402,65 @@ export class GraphScheduler {
    * model must pick from via `selectedEdgeIds` in its NodeOutcome.
    */
   private nodeContext(graph: CompiledGraph, node: CompiledNode): string {
-    let context = `Run goal: ${this.goal}`;
+    return `Run goal: ${this.goal}${this.routingContext(graph, node)}`;
+  }
+
+  /**
+   * The routing section listing a node's selectable outgoing edges. Kept in
+   * every context form (plain or collaboration packet): the model must see
+   * the edge ids + labels to fill `selectedEdgeIds`.
+   */
+  private routingContext(graph: CompiledGraph, node: CompiledNode): string {
     const selectable = graph.edges.filter(
       (edge) => edge.source === node.id && edge.when === "selected",
     );
-    if (selectable.length > 0) {
-      const choices = selectable
-        .map((edge) => `"${edge.id}" (${edge.label})`)
-        .join(", ");
-      context +=
-        `\n\nRouting: to pass work to the next node, include the matching ` +
-        `edge id in your output's selectedEdgeIds: ${choices}. ` +
-        `Leave selectedEdgeIds empty when no further work is needed.`;
+    if (selectable.length === 0) return "";
+    const choices = selectable
+      .map((edge) => `"${edge.id}" (${edge.label})`)
+      .join(", ");
+    return (
+      `\n\nRouting: to pass work to the next node, include the matching ` +
+      `edge id in your output's selectedEdgeIds: ${choices}. ` +
+      `Leave selectedEdgeIds empty when no further work is needed.`
+    );
+  }
+
+  /**
+   * Context for a node attempt. With a collaboration workspace, agent-like
+   * nodes get the assembled Markdown context packet (run objective, job,
+   * accessible paths, authority, incoming messages, predecessor outputs)
+   * built against the attempt's actual working directory; the routing
+   * section is appended either way.
+   */
+  private async contextFor(
+    graph: CompiledGraph,
+    plan: ExecutionPlan,
+    node: CompiledNode,
+    directory: string,
+  ): Promise<string> {
+    if (!this.collaboration || !isAgentLike(node)) {
+      return this.nodeContext(graph, node);
     }
-    return context;
+    const byId = new Map(plan.nodes.map((item) => [item.nodeId, item]));
+    const predecessors = graph.edges
+      .filter((edge) => edge.target === node.id)
+      .map((edge) => {
+        const source = graph.nodes.find((item) => item.id === edge.source);
+        const execution = byId.get(edge.source);
+        return {
+          nodeId: edge.source,
+          name: source?.name ?? edge.source,
+          status: execution?.status ?? "waiting",
+          summary: execution?.outcome?.summary ?? execution?.error,
+          artifacts: execution?.outcome?.artifacts ?? [],
+        };
+      });
+    const packet = await this.collaboration.buildContextPacket({
+      node,
+      directory,
+      predecessors,
+    });
+    return `${packet}${this.routingContext(graph, node)}`;
   }
 
   // --- Node execution -------------------------------------------------------
@@ -412,15 +477,50 @@ export class GraphScheduler {
     execution.error = undefined;
     plan.stepCount += 1;
     this.persistNode(plan, execution);
-    const context = this.nodeContext(graph, node);
-    this.observer.nodeStarted(node, execution.visits, context);
 
     if (node.kind === "checkpoint") {
-      this.completeCheckpoint(execution, node);
+      this.observer.nodeStarted(
+        node,
+        execution.visits,
+        this.nodeContext(graph, node),
+      );
+      await this.passCheckpoint(plan, execution, node);
       this.persistNode(plan, execution);
       this.observer.nodeFinished(node, execution);
       return;
     }
+
+    // Workspace isolation: workspace-write attempts branch a private node
+    // worktree off the current checkpoint; read-only nodes run in the run's
+    // integration worktree. A preparation failure is a node failure, never
+    // a scheduler crash.
+    let directory = this.directory;
+    let isolated = false;
+    if (this.workspaces && isAgentLike(node)) {
+      try {
+        const prepared = await this.workspaces.prepareNode({
+          nodeId: node.id,
+          visit: execution.visits,
+          access: node.access,
+        });
+        directory = prepared.directory;
+        isolated = prepared.branch !== undefined;
+      } catch (error) {
+        execution.status = "failed";
+        execution.error = errorMessage(error);
+        this.persistNode(plan, execution);
+        this.observer.nodeStarted(
+          node,
+          execution.visits,
+          this.nodeContext(graph, node),
+        );
+        this.observer.nodeFinished(node, execution);
+        return;
+      }
+    }
+
+    const context = await this.contextFor(graph, plan, node, directory);
+    this.observer.nodeStarted(node, execution.visits, context);
 
     const attempt: InFlightAttempt = {
       nodeId: node.id,
@@ -448,7 +548,7 @@ export class GraphScheduler {
           input: {
             runId: plan.runId,
             nodeId: node.id,
-            directory: this.directory,
+            directory,
             session,
             modelId: node.modelId,
             job: node.job,
@@ -478,6 +578,7 @@ export class GraphScheduler {
       ]);
       if (result === "cancelled" || attempt.cancelled || this.stopRequested) {
         execution.status = "cancelled";
+        await this.discardWorkspace(node);
         this.persistNode(plan, execution);
         this.observer.nodeFinished(node, execution);
         return;
@@ -485,6 +586,18 @@ export class GraphScheduler {
       execution.outcome = result.output;
       execution.status =
         result.output.status === "succeeded" ? "succeeded" : "failed";
+      // Post-outcome bookkeeping. Scope violations, delivery errors, and
+      // other collaboration/workspace failures convert into node failures
+      // (eligible for failure routing) instead of crashing the loop.
+      try {
+        if (execution.status === "succeeded" && isolated && this.workspaces) {
+          await this.workspaces.commitNode(node.id);
+        }
+        await this.deliverMessages(plan, node, result.output.messages);
+      } catch (error) {
+        execution.status = "failed";
+        execution.error = errorMessage(error);
+      }
     } catch (error) {
       if (attempt.cancelled || this.stopRequested) {
         execution.status = "cancelled";
@@ -495,8 +608,97 @@ export class GraphScheduler {
     } finally {
       this.inFlight.delete(attempt);
     }
+    // A node worktree whose attempt did not succeed never merges.
+    if (execution.status !== "succeeded") {
+      await this.discardWorkspace(node);
+    }
     this.persistNode(plan, execution);
     this.observer.nodeFinished(node, execution);
+  }
+
+  /** Discard a node's workspace-write worktree/branch, if any. */
+  private async discardWorkspace(node: CompiledNode): Promise<void> {
+    if (!this.workspaces || !isAgentLike(node)) return;
+    await this.workspaces.discardNode(node.id).catch(() => undefined);
+  }
+
+  /**
+   * Persist an outcome's collaboration drafts (database first, then the
+   * Markdown inboxes) with run-scoped chronological sequences.
+   */
+  private async deliverMessages(
+    plan: ExecutionPlan,
+    node: CompiledNode,
+    drafts: CollaborationMessageDraft[],
+  ): Promise<void> {
+    if (drafts.length === 0) return;
+    let sequence = this.database.listCollaborationMessages(plan.runId).length;
+    for (const draft of drafts) {
+      const message: CollaborationMessage = {
+        ...draft,
+        id: `${plan.runId}:${sequence}`,
+        runId: plan.runId,
+        senderNodeId: node.id,
+        sequence,
+        createdAt: new Date().toISOString(),
+      };
+      this.database.appendCollaborationMessage(message);
+      await this.collaboration?.deliver(message);
+      sequence += 1;
+    }
+  }
+
+  /**
+   * Pass a checkpoint (automatic pass or manual resume): merge every pending
+   * node branch into the integration branch — in node-id order — and record
+   * the checkpoint document. Merge conflicts flip the conflicting nodes to
+   * `failed` (eligible for failure routing); a merge/collaboration
+   * infrastructure error fails the checkpoint itself rather than crashing
+   * the loop.
+   */
+  private async passCheckpoint(
+    plan: ExecutionPlan,
+    execution: NodeExecution,
+    node: CheckpointNode,
+  ): Promise<void> {
+    if (this.workspaces) {
+      let mergeError: unknown;
+      try {
+        const result = await this.workspaces.mergeAtCheckpoint();
+        for (const conflict of result.conflicts) {
+          const target = plan.nodes.find(
+            (item) => item.nodeId === conflict.nodeId,
+          );
+          if (!target) continue;
+          target.status = "failed";
+          target.error =
+            `Merge conflict merging node ${conflict.nodeId} at checkpoint ` +
+            `${node.id}: ${conflict.files.join(", ") || "unknown files"}.`;
+          this.persistNode(plan, target);
+        }
+      } catch (error) {
+        mergeError = error;
+      }
+      if (mergeError !== undefined) {
+        execution.status = "failed";
+        execution.error = errorMessage(mergeError);
+        return;
+      }
+    }
+    if (this.collaboration) {
+      try {
+        await this.collaboration.recordCheckpoint({
+          nodeId: node.id,
+          name: node.name,
+          summary: `Checkpoint ${node.name} passed.`,
+        });
+      } catch (error) {
+        execution.status = "failed";
+        execution.error = errorMessage(error);
+        return;
+      }
+    }
+    this.completeCheckpoint(execution, node);
   }
 
   private completeCheckpoint(
