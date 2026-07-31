@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CollaborationMessage } from "../shared/collaboration";
 import type { GraphDefinition } from "../shared/domain";
 import type {
@@ -322,6 +322,24 @@ describe("SpireDatabase graph v2", () => {
     const broken = { ...migrateLegacyGraph(legacyGraphFixture), maxSteps: 0 };
     expect(() => database.saveGraphV2(broken as never)).toThrowError();
     expect(database.listGraphsV2()).toHaveLength(0);
+  });
+
+  it("skips a corrupt row instead of failing the whole v2 listing", () => {
+    database.saveGraph(legacyGraphFixture);
+    // A row that parses as neither the legacy nor the v2 schema.
+    database.saveGraph({
+      id: "corrupt",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      nodes: "not-a-node-list",
+    } as never);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const graphs = database.listGraphsV2();
+    expect(graphs).toHaveLength(1);
+    expect(graphs[0]).toEqual(migrateLegacyGraph(legacyGraphFixture));
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 

@@ -1,41 +1,41 @@
 import { randomUUID } from "node:crypto";
 import type {
-  GraphDefinition,
-  LegacyAgentNode,
+  GraphDefinitionV2,
   RunEvent,
   RunRecord,
   RunStatus,
   StartRunInput,
-  TaskBrief,
 } from "../shared/domain";
-import {
-  implementationReportSchema,
-  reviewVerdictSchema,
-  taskBriefSchema,
-} from "../shared/domain";
+import type { ExecutionPlan, NodeExecution } from "../shared/execution";
+import type { HarnessEvent, HarnessRegistry } from "../shared/harness";
 import type { JsonValue } from "../shared/workspace";
 import type { SpireDatabase } from "./database";
-import type { AgentHarness, HarnessPrompt } from "./harness/opencode";
-import type { TraceJournal } from "./trace-journal";
+import { migrateLegacyGraph } from "./graph-migration";
 import {
-  implementationPrompt,
-  implementationSystem,
-  parseJson,
-  plannerSystem,
-  planningPrompt,
-  repairPrompt,
-  reviewPrompt,
-} from "./prompts";
+  compileExecutionPlan,
+  compileGraph,
+  type CompiledGraph,
+  type CompiledNode,
+  type SubgraphResolver,
+} from "./scheduler/graph-compiler";
+import {
+  GraphScheduler,
+  type ResumeOptions,
+  type SchedulerObserver,
+} from "./scheduler/scheduler";
+import type { TraceJournal } from "./trace-journal";
 import type { ExecutionBackend } from "./worktree";
 
 /** Maximum number of RunEvents kept in a RunRecord's events array. */
 const MAX_RUN_EVENTS = 200;
 
-type SessionState = {
-  planner?: string;
-  implementer?: string;
-  active?: { id: string; directory: string };
-};
+/** Run statuses that mean the engine is actively driving the run. */
+const ACTIVE_STATUSES: RunStatus[] = [
+  "preparing",
+  "planning",
+  "implementing",
+  "reviewing",
+];
 
 /**
  * Normalize a payload to the JSON domain (drops `undefined` properties, which
@@ -50,30 +50,76 @@ function toJsonValue(value: unknown): JsonValue {
   }
 }
 
+function harnessEventMessage(event: HarnessEvent): string {
+  switch (event.type) {
+    case "session":
+      return `Session ${event.session.sessionId}`;
+    case "assistant_text":
+    case "reasoning":
+      return event.text;
+    case "tool_start":
+      return `${event.tool} pending`;
+    case "tool_progress":
+      return event.message;
+    case "tool_result":
+      return event.error ? `${event.tool} error` : `${event.tool} completed`;
+    case "approval":
+      return event.title;
+    case "usage":
+      return "Usage reported";
+    case "stdout":
+    case "stderr":
+      return event.text;
+    case "warning":
+    case "error":
+    case "timeout":
+    case "cancelled":
+    case "status":
+      return event.message;
+  }
+}
+
+/**
+ * Drives a run: compiles the run's graph version into a persisted execution
+ * plan and lets the GraphScheduler route node work through the HarnessRegistry.
+ * The engine owns the RunRecord lifecycle (statuses, events, artifacts) and
+ * maps scheduler progress onto it; the plan is the durable execution state.
+ */
 export class RunEngine {
   private activeRunId?: string;
-  private sessions = new Map<string, SessionState>();
+  private schedulers = new Map<string, GraphScheduler>();
+  /** The live run objects mutated by in-flight executions, keyed by run id. */
+  private live = new Map<string, RunRecord>();
 
   constructor(
     private readonly database: SpireDatabase,
-    private readonly harness: AgentHarness,
+    private readonly registry: HarnessRegistry,
     private readonly backend: ExecutionBackend,
     private readonly notify: (event: RunEvent) => void,
     private readonly journal?: TraceJournal,
   ) {
     const active = database
       .listRuns()
-      .find((run) =>
-        ["preparing", "planning", "implementing", "reviewing"].includes(
-          run.status,
-        ),
-      );
-    if (active) {
+      .find((run) => ACTIVE_STATUSES.includes(run.status));
+    if (!active) return;
+    const plan = database.getExecutionPlan(active.id);
+    if (!plan) {
+      // Pre-scheduler run record with no durable plan: nothing to resume.
       active.status = "failed";
       active.error = "Spire closed while this run was active.";
       active.finishedAt = new Date().toISOString();
       database.saveRun(active);
+      return;
     }
+    // Restart recovery: orphaned attempts are converted to failures inside
+    // resume(), and routing continues from the persisted plan — the run is
+    // not failed merely because Spire closed.
+    this.activeRunId = active.id;
+    this.live.set(active.id, active);
+    void this.resumePlan(active, plan).finally(() => {
+      this.live.delete(active.id);
+      if (this.activeRunId === active.id) this.activeRunId = undefined;
+    });
   }
 
   get activeId(): string | undefined {
@@ -95,23 +141,25 @@ export class RunEngine {
       events: [],
     };
     this.database.saveGraph(input.graph);
+    const graph = migrateLegacyGraph(input.graph);
+    // Persist the compiled plan before execution starts.
+    const plan = this.compilePlan(graph, id);
+    this.database.saveExecutionPlan(plan);
     this.database.saveRun(run);
     this.activeRunId = id;
-    this.sessions.set(id, {});
-    void this.execute(run, input.graph).finally(() => {
+    this.live.set(id, run);
+    void this.execute(run, graph, plan).finally(() => {
+      this.live.delete(id);
       if (this.activeRunId === id) this.activeRunId = undefined;
     });
     return run;
   }
 
   async stop(runId: string): Promise<void> {
-    const run = this.requireRun(runId);
-    const session = this.sessions.get(runId);
-    if (session?.active) {
-      await this.harness
-        .abort(session.active.id, session.active.directory)
-        .catch(() => undefined);
-    }
+    const run = this.live.get(runId) ?? this.requireRun(runId);
+    const scheduler = this.schedulers.get(runId);
+    if (scheduler) await scheduler.stop();
+    if (run.status === "stopped") return;
     this.transition(run, "stopped", "Run stopped by user.");
     run.finishedAt = new Date().toISOString();
     this.database.saveRun(run);
@@ -124,29 +172,26 @@ export class RunEngine {
     if (!["failed", "needs_attention", "stopped"].includes(run.status)) {
       throw new Error("Only stopped or failed runs can be retried.");
     }
-    const graphs = this.database.listGraphs();
-    const graph = graphs.find(
-      (item) => item.id === run.graphId && item.version === run.graphVersion,
-    );
-    if (!graph || !run.artifacts?.worktreePath) {
+    if (!run.artifacts?.worktreePath) {
       throw new Error("The saved graph or workspace is unavailable.");
-    }
-    if (run.status === "needs_attention") {
-      run.iteration = Math.max(0, run.iteration - 1);
     }
     run.error = undefined;
     run.finishedAt = undefined;
     this.activeRunId = runId;
-    this.sessions.set(runId, {});
-    void this.resume(run, graph).finally(() => {
+    this.live.set(runId, run);
+    void this.retryPlan(run).finally(() => {
+      this.live.delete(runId);
       if (this.activeRunId === runId) this.activeRunId = undefined;
     });
     return run;
   }
 
+  // --- Run lifecycle --------------------------------------------------------
+
   private async execute(
     run: RunRecord,
-    graph: GraphDefinition,
+    graph: GraphDefinitionV2,
+    plan: ExecutionPlan,
   ): Promise<void> {
     try {
       this.emit(run, "status", "preparing", "Creating isolated worktree");
@@ -169,227 +214,284 @@ export class RunEngine {
           "Source repository has uncommitted changes; the worktree starts from HEAD.",
         );
       }
-      await this.runGraph(run, graph);
+      const compiled = compileGraph(graph, this.subgraphResolver());
+      const scheduler = this.createScheduler(run);
+      const final = await scheduler.start(compiled, plan);
+      await this.finishFromPlan(run, final);
     } catch (error) {
       this.fail(run, error);
     }
   }
 
-  private async resume(
-    run: RunRecord,
-    graph: GraphDefinition,
-  ): Promise<void> {
+  /** Restart recovery: resume routing from the persisted plan. */
+  private async resumePlan(run: RunRecord, plan: ExecutionPlan): Promise<void> {
     try {
-      this.emit(run, "status", "preparing", "Retrying from saved workspace");
-      await this.runGraph(run, graph, run.artifacts?.brief);
+      const compiled = this.compileFor(plan);
+      const scheduler = this.createScheduler(run);
+      const final = await scheduler.resume(compiled, plan);
+      await this.finishFromPlan(run, final);
     } catch (error) {
       this.fail(run, error);
     }
   }
 
-  private async runGraph(
+  /** User-initiated retry: re-queue failed nodes and reset the step budget. */
+  private async retryPlan(run: RunRecord): Promise<void> {
+    const options: ResumeOptions = { retryFailed: true, resetSteps: true };
+    try {
+      let plan = this.database.getExecutionPlan(run.id);
+      if (!plan) {
+        // Run predates durable plans: compile a fresh one from the graph.
+        const graph = this.loadGraph(run.graphId, run.graphVersion);
+        plan = this.compilePlan(graph, run.id);
+        this.database.saveExecutionPlan(plan);
+      }
+      const compiled = this.compileFor(plan);
+      const scheduler = this.createScheduler(run);
+      const final = await scheduler.resume(compiled, plan, options);
+      await this.finishFromPlan(run, final);
+    } catch (error) {
+      this.fail(run, error);
+    }
+  }
+
+  private async finishFromPlan(
     run: RunRecord,
-    graph: GraphDefinition,
-    savedBrief?: TaskBrief,
+    plan: ExecutionPlan,
   ): Promise<void> {
-    const planner = graph.nodes.find((node) => node.role === "planner")!;
-    const implementer = graph.nodes.find(
-      (node) => node.role === "implementer",
-    )!;
-    const worktreePath = run.artifacts!.worktreePath;
-    const brief =
-      savedBrief ??
-      (await this.structuredPrompt(
-        run,
-        planner,
-        "planning",
-        plannerSystem(graph),
-        planningPrompt(run.goal),
-        taskBriefSchema,
-        "TaskBrief",
-      ));
-    run.artifacts!.brief = brief;
-    this.database.saveRun(run);
-
-    let feedback = run.artifacts?.verdict?.feedback ?? [];
-    while (run.iteration < graph.maxIterations) {
-      run.iteration += 1;
-      this.database.saveRun(run);
-      const implementation = await this.structuredPrompt(
-        run,
-        implementer,
-        "implementing",
-        implementationSystem(graph),
-        implementationPrompt(brief, feedback),
-        implementationReportSchema,
-        "ImplementationReport",
-      );
-      run.artifacts!.implementation = implementation;
-      const inspection = await this.backend.inspect(worktreePath);
-      run.artifacts!.diff = inspection.diff;
-      run.artifacts!.changedFiles = inspection.changedFiles;
-      this.database.saveRun(run);
-
-      const verdict = await this.structuredPrompt(
-        run,
-        planner,
-        "reviewing",
-        plannerSystem(graph),
-        reviewPrompt(brief, implementation, inspection.diff),
-        reviewVerdictSchema,
-        "ReviewVerdict",
-      );
-      run.artifacts!.verdict = verdict;
-      this.database.saveRun(run);
-      if (verdict.decision === "accepted") {
-        this.transition(run, "succeeded", "Planner accepted the implementation.");
+    if (run.status === "stopped") return;
+    switch (plan.status) {
+      case "succeeded": {
+        const inspection = await this.backend.inspect(
+          run.artifacts!.worktreePath,
+        );
+        run.artifacts!.diff = inspection.diff;
+        run.artifacts!.changedFiles = inspection.changedFiles;
+        this.transition(run, "succeeded", "All graph work completed.");
         run.finishedAt = new Date().toISOString();
         this.database.saveRun(run);
         return;
       }
-      feedback = verdict.feedback;
-      this.emit(
-        run,
-        "transition",
-        "reviewing",
-        `Revision requested; returning to implementer (${run.iteration}/${graph.maxIterations}).`,
-      );
-    }
-    this.transition(
-      run,
-      "needs_attention",
-      `Iteration limit reached after ${graph.maxIterations} attempts.`,
-    );
-    run.finishedAt = new Date().toISOString();
-    this.database.saveRun(run);
-  }
-
-  private async structuredPrompt<T>(
-    run: RunRecord,
-    node: LegacyAgentNode,
-    phase: Extract<RunStatus, "planning" | "implementing" | "reviewing">,
-    system: string,
-    prompt: string,
-    parser: { parse(value: unknown): T },
-    schemaName: string,
-  ): Promise<T> {
-    this.transition(run, phase, `${node.name} started`);
-    const first = await this.send(run, node, phase, system, prompt);
-    try {
-      return parseJson(first, parser);
-    } catch {
-      this.emit(
-        run,
-        "repair",
-        phase,
-        `${node.name} returned invalid structured output; requesting one repair.`,
-      );
-      const repaired = await this.send(
-        run,
-        node,
-        phase,
-        system,
-        repairPrompt(schemaName, first),
-      );
-      return parseJson(repaired, parser);
-    }
-  }
-
-  private async send(
-    run: RunRecord,
-    node: LegacyAgentNode,
-    phase: string,
-    system: string,
-    prompt: string,
-  ): Promise<string> {
-    const sessions = this.sessions.get(run.id)!;
-    const role = node.role;
-    this.journalEvent({
-      runId: run.id,
-      nodeId: node.id,
-      harnessId: node.type,
-      kind: "run.prompt",
-      message: `${node.name} prompt sent (${phase})`,
-      payload: {
-        phase,
-        model: node.model,
-        sessionId: sessions[role],
-        system,
-        prompt,
-      },
-    });
-    const input: HarnessPrompt = {
-      directory: run.artifacts!.worktreePath,
-      sessionId: sessions[role],
-      title: `${run.goal.slice(0, 50)} — ${node.name}`,
-      model: node.model,
-      system,
-      prompt,
-      readOnly: node.role === "planner",
-      onSession: (sessionId) => {
-        sessions[role] = sessionId;
-        sessions.active = {
-          id: sessionId,
-          directory: run.artifacts!.worktreePath,
-        };
-      },
-      onEvent: (kind, message, payload) => {
+      case "failed": {
+        const failedNode = plan.nodes.find((node) => node.status === "failed");
+        const message =
+          failedNode?.error ??
+          failedNode?.outcome?.summary ??
+          "The execution plan failed.";
+        run.error = message;
+        run.finishedAt = new Date().toISOString();
+        this.transition(run, "failed", message, failedNode?.nodeId);
         this.journalEvent({
           runId: run.id,
-          nodeId: node.id,
-          harnessId: node.type,
-          kind: `run.${kind}`,
+          nodeId: failedNode?.nodeId,
+          kind: "run.failure",
+          level: "error",
           message,
-          payload,
         });
-        this.emit(run, kind, phase, message, node.id, this.redact(payload));
-      },
+        this.database.saveRun(run);
+        return;
+      }
+      case "needs_attention":
+        this.transition(
+          run,
+          "needs_attention",
+          "The run needs attention before it can continue.",
+        );
+        run.finishedAt = new Date().toISOString();
+        this.database.saveRun(run);
+        return;
+      case "paused":
+        this.transition(
+          run,
+          "needs_attention",
+          "Run paused; retry the run to resume.",
+        );
+        run.finishedAt = new Date().toISOString();
+        this.database.saveRun(run);
+        return;
+      case "running":
+        return;
+    }
+  }
+
+  // --- Scheduler wiring -----------------------------------------------------
+
+  private compilePlan(graph: GraphDefinitionV2, runId: string): ExecutionPlan {
+    return compileExecutionPlan(graph, runId, this.subgraphResolver());
+  }
+
+  private compileFor(plan: ExecutionPlan): CompiledGraph {
+    const graph = this.loadGraph(plan.graphId, plan.graphVersion);
+    return compileGraph(graph, this.subgraphResolver());
+  }
+
+  private loadGraph(graphId: string, version: number): GraphDefinitionV2 {
+    const graph = this.database
+      .listGraphsV2()
+      .find((item) => item.id === graphId && item.version === version);
+    if (!graph) throw new Error("The saved graph is unavailable.");
+    return graph;
+  }
+
+  private subgraphResolver(): SubgraphResolver {
+    return (graphId, version) => {
+      const versions = this.database
+        .listGraphsV2()
+        .filter((item) => item.id === graphId);
+      const pinned =
+        version !== undefined
+          ? versions.find((item) => item.version === version)
+          : undefined;
+      const resolved =
+        pinned ??
+        (version === undefined
+          ? versions.reduce<GraphDefinitionV2 | undefined>(
+              (latest, item) =>
+                !latest || item.version > latest.version ? item : latest,
+              undefined,
+            )
+          : undefined);
+      if (!resolved) {
+        throw new Error(`Subgraph ${graphId} is not available.`);
+      }
+      return resolved;
     };
-    const response = await this.harness.prompt(input);
-    sessions[role] = response.sessionId;
+  }
+
+  private createScheduler(run: RunRecord): GraphScheduler {
+    const scheduler = new GraphScheduler({
+      database: this.database,
+      registry: this.registry,
+      goal: run.goal,
+      directory: run.artifacts!.worktreePath,
+      observer: this.observerFor(run),
+    });
+    this.schedulers.set(run.id, scheduler);
+    return scheduler;
+  }
+
+  private observerFor(run: RunRecord): SchedulerObserver {
+    return {
+      nodeStarted: (node, visit) => this.markNodeStart(run, node, visit),
+      nodeFinished: (node, execution) =>
+        this.markNodeFinish(run, node, execution),
+      harnessEvent: (nodeId, event) => {
+        const message = harnessEventMessage(event);
+        this.journalEvent({
+          runId: run.id,
+          nodeId,
+          kind: `run.${event.type}`,
+          message,
+          payload: event,
+        });
+        this.emit(
+          run,
+          event.type,
+          run.status,
+          message,
+          nodeId,
+          this.redact(event),
+        );
+      },
+      planUpdated: () => undefined,
+    };
+  }
+
+  /**
+   * Map a node start onto the legacy run phases so the existing UI keeps its
+   * planning/implementing/reviewing signals for migrated legacy graphs.
+   */
+  private markNodeStart(
+    run: RunRecord,
+    node: CompiledNode,
+    visit: number,
+  ): void {
+    const roleLabel =
+      node.kind === "agent" || node.kind === "decision"
+        ? node.roleLabel
+        : undefined;
+    const phase: RunStatus =
+      roleLabel === "planner"
+        ? visit <= 1
+          ? "planning"
+          : "reviewing"
+        : roleLabel === "implementer"
+          ? "implementing"
+          : ACTIVE_STATUSES.includes(run.status)
+            ? run.status
+            : "implementing";
+    this.transition(run, phase, `${node.name} started`, node.id);
+    if (node.kind === "agent" || node.kind === "decision") {
+      const stored = this.database.getHarnessSession(run.id, node.id);
+      this.journalEvent({
+        runId: run.id,
+        nodeId: node.id,
+        harnessId: node.harnessId,
+        kind: "run.prompt",
+        message: `${node.name} prompt sent`,
+        payload: {
+          job: node.job,
+          model: node.modelId,
+          sessionId: stored?.sessionId,
+          visit,
+        },
+      });
+    }
+  }
+
+  private markNodeFinish(
+    run: RunRecord,
+    node: CompiledNode,
+    execution: NodeExecution,
+  ): void {
+    if (
+      (node.kind === "agent" || node.kind === "decision") &&
+      node.roleLabel === "implementer"
+    ) {
+      run.iteration = execution.visits;
+    }
+    const message =
+      execution.outcome?.summary ?? execution.error ?? `${node.name} finished`;
     this.journalEvent({
       runId: run.id,
       nodeId: node.id,
-      harnessId: node.type,
+      harnessId:
+        node.kind === "agent" || node.kind === "decision"
+          ? node.harnessId
+          : undefined,
       kind: "run.response",
-      message: `${node.name} responded (${phase})`,
-      payload: { phase, sessionId: response.sessionId, text: response.text },
+      level: execution.status === "failed" ? "error" : "info",
+      message: `${node.name} responded`,
+      payload: {
+        status: execution.status,
+        outcome: execution.outcome,
+        error: execution.error,
+      },
     });
     this.emit(
       run,
-      "message",
-      phase,
-      response.text.slice(0, 1000),
+      execution.status === "failed" ? "error" : "message",
+      run.status,
+      message.slice(0, 1000),
       node.id,
     );
-    return response.text;
+    this.database.saveRun(run);
   }
+
+  // --- Run record plumbing --------------------------------------------------
 
   private transition(
     run: RunRecord,
     status: RunStatus,
     message: string,
+    nodeId?: string,
   ): void {
     run.status = status;
-    const role =
-      status === "implementing"
-        ? "implementer"
-        : status === "planning" || status === "reviewing"
-          ? "planner"
-          : undefined;
-    const graph = this.database
-      .listGraphs()
-      .find(
-        (item) =>
-          item.id === run.graphId && item.version === run.graphVersion,
-      );
-    run.activeNodeId = role
-      ? graph?.nodes.find((node) => node.role === role)?.id
-      : undefined;
-    this.emit(run, "status", status, message, run.activeNodeId);
+    run.activeNodeId = nodeId;
+    this.emit(run, "status", status, message, nodeId);
     this.journalEvent({
       runId: run.id,
-      nodeId: run.activeNodeId,
+      nodeId,
       kind: "run.transition",
       message,
       payload: { status },

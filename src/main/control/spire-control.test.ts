@@ -15,9 +15,67 @@ import type {
   HarnessResponse,
 } from "../harness/opencode";
 import type { OpenCodeStatus } from "../../shared/domain";
+import type { NodeOutcome } from "../../shared/execution";
+import type {
+  HarnessAdapter,
+  HarnessProbeStatus,
+  HarnessRunInput,
+  HarnessRunResult,
+  HarnessSessionRef,
+} from "../../shared/harness";
+import { createHarnessRegistry } from "../harness/registry";
 import { RunEngine } from "../run-engine";
 import type { ExecutionBackend, PreparedWorkspace } from "../worktree";
 import { SpireControl } from "./spire-control";
+
+function okOutcome(summary = "done"): NodeOutcome {
+  return {
+    status: "succeeded",
+    summary,
+    artifacts: [],
+    messages: [],
+    selectedEdgeIds: [],
+  };
+}
+
+/** HarnessAdapter fake driving the scheduler-based RunEngine. */
+class FakeAdapter implements HarnessAdapter {
+  readonly id = "opencode" as const;
+  private index = 0;
+
+  constructor(
+    private readonly outputs: unknown[] = [],
+    private readonly hang = false,
+  ) {}
+
+  async probe(): Promise<HarnessProbeStatus> {
+    return {
+      harnessId: "opencode",
+      installed: true,
+      binaryPath: "/usr/bin/opencode",
+      version: "1.0.0",
+      compatible: true,
+      connected: true,
+    };
+  }
+  async listModels() {
+    return [{ id: "openrouter/test-model", name: "Test Model" }];
+  }
+  run(input: HarnessRunInput): Promise<HarnessRunResult> {
+    const ref: HarnessSessionRef = {
+      harnessId: "opencode",
+      sessionId: input.session?.sessionId ?? `session-${this.index}`,
+      directory: input.directory,
+    };
+    input.onSession(ref);
+    if (this.hang) return new Promise<HarnessRunResult>(() => undefined);
+    const output = this.outputs[this.index] ?? okOutcome();
+    this.index += 1;
+    return Promise.resolve({ session: ref, output });
+  }
+  async abort(): Promise<void> {}
+  async close(): Promise<void> {}
+}
 
 class FakeHarness implements AgentHarness {
   private index = 0;
@@ -126,29 +184,6 @@ function graph(id = "graph", version = 1, maxIterations = 3): GraphDefinition {
   };
 }
 
-const brief = JSON.stringify({
-  goal: "Add value",
-  constraints: [],
-  acceptanceChecks: ["value exists"],
-  implementationNotes: [],
-});
-const implementation = JSON.stringify({
-  summary: "Added value",
-  changedFiles: ["src/value.ts"],
-  validations: [{ command: "pnpm test", status: "passed" }],
-  blockers: [],
-});
-const accepted = JSON.stringify({
-  decision: "accepted",
-  evidence: ["value exists"],
-  feedback: [],
-});
-const needsChanges = JSON.stringify({
-  decision: "needs_changes",
-  evidence: [],
-  feedback: ["try again"],
-});
-
 function layoutRecord(graphId = "graph"): WorkspaceLayoutRecord {
   return {
     graphId,
@@ -173,17 +208,20 @@ function createControl(answers: string[] = [], hang = false) {
   const database = new SpireDatabase(":memory:");
   const journal = database.createTraceJournal();
   const harness = new FakeHarness(answers, hang);
+  const adapter = new FakeAdapter([], hang);
+  const registry = createHarnessRegistry([adapter]);
   const backend = new FakeBackend();
-  const engine = new RunEngine(database, harness, backend, () => undefined);
+  const engine = new RunEngine(database, registry, backend, () => undefined);
   const control = new SpireControl({
     database,
     engine,
     harness,
+    registry,
     backend,
     journal,
     environment: { appVersion: "1.2.3-test", platform: "linux", isWayland: false },
   });
-  return { control, database, journal, harness, backend, engine };
+  return { control, database, journal, harness, adapter, registry, backend, engine };
 }
 
 async function makeRepository(): Promise<string> {
@@ -215,8 +253,7 @@ describe("SpireControl registry", () => {
   });
 
   it("executes every registered operation through dispatch", async () => {
-    const answers = [brief, implementation, accepted];
-    const { control, database } = createControl(answers);
+    const { control, database } = createControl();
     database.saveGraph(graph());
     const repositoryPath = await makeRepository();
 
@@ -522,7 +559,7 @@ describe("repositories.validate", () => {
 
 describe("runs operations", () => {
   it("starts a run, returning the persisted record", async () => {
-    const { control, database } = createControl([brief, implementation, accepted]);
+    const { control, database } = createControl();
     const repositoryPath = await makeRepository();
     const run = await control.execute("runs.start", {
       graph: graph(),
@@ -570,14 +607,10 @@ describe("runs operations", () => {
     expect(stopped.finishedAt).toBeDefined();
   });
 
-  it("retries a run that exhausted its iterations", async () => {
-    const { control, database } = createControl([
-      brief,
-      implementation,
-      needsChanges,
-      implementation,
-      accepted,
-    ]);
+  it("retries a run that exhausted its step budget until the graph quiesces", async () => {
+    // maxIterations 1 compiles to maxSteps 2; each retry resets the step
+    // budget, and the migrated legacy cycle quiesces at the visit bound.
+    const { control, database } = createControl();
     const repositoryPath = await makeRepository();
     const run = await control.execute("runs.start", {
       graph: graph("graph", 1, 1),
@@ -592,6 +625,12 @@ describe("runs operations", () => {
 
     const retried = await control.execute("runs.retry", { runId: run.id });
     expect(retried.id).toBe(run.id);
+    await vi.waitFor(
+      () =>
+        expect(database.getRun(run.id)?.status).toBe("needs_attention"),
+      { timeout: 3000 },
+    );
+    await control.execute("runs.retry", { runId: run.id });
     await vi.waitFor(
       () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
       { timeout: 3000 },
@@ -661,7 +700,7 @@ describe("runs operations", () => {
 
 describe("runs.artifacts.get", () => {
   it("returns the semantic artifact including the patch content", async () => {
-    const { control, database } = createControl([brief, implementation, accepted]);
+    const { control, database } = createControl();
     const repositoryPath = await makeRepository();
     const run = await control.execute("runs.start", {
       graph: graph(),
@@ -678,7 +717,6 @@ describe("runs.artifacts.get", () => {
     expect(artifacts.diff).toBe("+export const value = 1;");
     expect(artifacts.changedFiles).toEqual(["src/value.ts"]);
     expect(artifacts.branch).toBe("spire/test");
-    expect(artifacts.brief?.goal).toBe("Add value");
   });
 
   it("rejects runs without artifacts and unknown runs", async () => {
@@ -787,6 +825,7 @@ describe("harnesses operations", () => {
         id: "opencode",
         name: "OpenCode",
         status: {
+          harnessId: "opencode",
           installed: true,
           binaryPath: "/usr/bin/opencode",
           version: "1.0.0",
@@ -797,15 +836,17 @@ describe("harnesses operations", () => {
     ]);
   });
 
-  it("returns models for the OpenCode harness and rejects unknown harnesses", async () => {
+  it("returns models for a known harness and rejects unknown harnesses", async () => {
     const { control } = createControl();
     const models = await control.execute("harnesses.models", {
       harnessId: "opencode",
     });
     expect(models).toEqual([{ id: "openrouter/test-model", name: "Test Model" }]);
-    await expect(
+    // Unknown harness ids fail input validation, which execute() throws
+    // synchronously.
+    expect(() =>
       control.execute("harnesses.models", { harnessId: "claude" }),
-    ).rejects.toThrow(/harness/i);
+    ).toThrow(/harness/i);
   });
 });
 
@@ -858,9 +899,10 @@ describe("AppService facade", () => {
   function createService(answers: string[] = []) {
     const database = new SpireDatabase(":memory:");
     const harness = new FakeHarness(answers);
+    const registry = createHarnessRegistry([new FakeAdapter()]);
     const backend = new FakeBackend();
-    const engine = new RunEngine(database, harness, backend, () => undefined);
-    const service = new AppService(database, harness, engine, backend);
+    const engine = new RunEngine(database, registry, backend, () => undefined);
+    const service = new AppService(database, harness, engine, backend, registry);
     return { service, database, harness, backend };
   }
 
@@ -911,7 +953,7 @@ describe("AppService facade", () => {
   });
 
   it("starts and stops runs, returning snapshots with the active run", async () => {
-    const { service } = createService([brief, implementation, accepted]);
+    const { service } = createService();
     const repositoryPath = await makeRepository();
     const started = await service.startRun({
       graph: graph(),

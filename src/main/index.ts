@@ -6,6 +6,7 @@ import { SpireControl } from "./control/spire-control";
 import { SpireDatabase } from "./database";
 import { detectEnvironment, registerIpc, sendRunEvent } from "./ipc";
 import { OpenCodeHarness } from "./harness/opencode";
+import { createDefaultHarnessRegistry } from "./harness/registry";
 import { RunEngine } from "./run-engine";
 import { isAllowedPopoutUrl } from "./window-policy";
 import { LocalWorktreeBackend } from "./worktree";
@@ -120,11 +121,12 @@ void app.whenReady().then(() => {
     seedFromFixture(database, process.env.SPIRE_SEED);
   }
   harness = new OpenCodeHarness();
+  const registry = createDefaultHarnessRegistry(dataRoot);
   const backend = new LocalWorktreeBackend(path.join(dataRoot, "worktrees"));
   const journal = database.createTraceJournal();
   const engine = new RunEngine(
     database,
-    harness,
+    registry,
     backend,
     (event) => sendRunEvent(mainWindow, event),
     journal,
@@ -133,6 +135,7 @@ void app.whenReady().then(() => {
     database,
     engine,
     harness,
+    registry,
     backend,
     journal,
     environment: { appVersion: app.getVersion(), ...detectEnvironment() },

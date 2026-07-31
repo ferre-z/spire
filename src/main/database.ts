@@ -259,14 +259,26 @@ export class SpireDatabase {
 
   /**
    * List every stored graph as graph v2. Rows saved by legacy callers are
-   * normalized on read; rows saved via saveGraphV2 are returned as-is.
+   * normalized on read; rows saved via saveGraphV2 are returned as-is. A
+   * single corrupt or unparseable row is skipped with a warning rather than
+   * failing the whole listing.
    */
   listGraphsV2(): GraphDefinitionV2[] {
-    return (
-      this.db
-        .prepare("SELECT json FROM graphs ORDER BY created_at DESC")
-        .all() as JsonRow[]
-    ).map((row) => readGraphDefinition(JSON.parse(row.json)));
+    const rows = this.db
+      .prepare("SELECT json FROM graphs ORDER BY created_at DESC")
+      .all() as JsonRow[];
+    const graphs: GraphDefinitionV2[] = [];
+    for (const row of rows) {
+      try {
+        graphs.push(readGraphDefinition(JSON.parse(row.json)));
+      } catch (error) {
+        console.warn(
+          "Skipping corrupt graph row:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    return graphs;
   }
 
   saveExecutionPlan(plan: ExecutionPlan): void {

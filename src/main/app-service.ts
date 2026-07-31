@@ -6,6 +6,7 @@ import type {
   StartRunInput,
 } from "../shared/domain";
 import type { WorkspaceLayoutRecord } from "../shared/workspace";
+import type { HarnessRegistry } from "../shared/harness";
 import { SpireControl } from "./control/spire-control";
 import type { SpireDatabase } from "./database";
 import type { AgentHarness } from "./harness/opencode";
@@ -27,11 +28,13 @@ export class AppService {
     harness: AgentHarness,
     engine: RunEngine,
     backend: ExecutionBackend,
+    registry: HarnessRegistry,
   ) {
     this.control = new SpireControl({
       database,
       engine,
       harness,
+      registry,
       backend,
       journal: database.createTraceJournal(),
     });

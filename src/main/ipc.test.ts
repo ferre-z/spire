@@ -31,8 +31,60 @@ import type {
   HarnessPrompt,
   HarnessResponse,
 } from "./harness/opencode";
+import type { NodeOutcome } from "../shared/execution";
+import type {
+  HarnessAdapter,
+  HarnessProbeStatus,
+  HarnessRunInput,
+  HarnessRunResult,
+  HarnessSessionRef,
+} from "../shared/harness";
+import { createHarnessRegistry } from "./harness/registry";
 import { RunEngine } from "./run-engine";
 import type { ExecutionBackend, PreparedWorkspace } from "./worktree";
+
+function okOutcome(summary = "done"): NodeOutcome {
+  return {
+    status: "succeeded",
+    summary,
+    artifacts: [],
+    messages: [],
+    selectedEdgeIds: [],
+  };
+}
+
+/** HarnessAdapter fake driving the scheduler-based RunEngine. */
+class FakeAdapter implements HarnessAdapter {
+  readonly id = "opencode" as const;
+  private index = 0;
+
+  async probe(): Promise<HarnessProbeStatus> {
+    return {
+      harnessId: "opencode",
+      installed: true,
+      binaryPath: "/usr/bin/opencode",
+      version: "1.0.0",
+      compatible: true,
+      connected: true,
+    };
+  }
+  async listModels() {
+    return [{ id: "openrouter/test-model", name: "Test Model" }];
+  }
+  run(input: HarnessRunInput): Promise<HarnessRunResult> {
+    const ref: HarnessSessionRef = {
+      harnessId: "opencode",
+      sessionId: input.session?.sessionId ?? `session-${this.index}`,
+      directory: input.directory,
+    };
+    input.onSession(ref);
+    const output = okOutcome();
+    this.index += 1;
+    return Promise.resolve({ session: ref, output });
+  }
+  async abort(): Promise<void> {}
+  async close(): Promise<void> {}
+}
 
 class FakeHarness implements AgentHarness {
   private index = 0;
@@ -194,17 +246,19 @@ function createControl(answers: string[] = []) {
   const database = new SpireDatabase(":memory:");
   const journal = database.createTraceJournal();
   const harness = new FakeHarness(answers);
+  const registry = createHarnessRegistry([new FakeAdapter()]);
   const backend = new FakeBackend();
-  const engine = new RunEngine(database, harness, backend, () => undefined);
+  const engine = new RunEngine(database, registry, backend, () => undefined);
   const control = new SpireControl({
     database,
     engine,
     harness,
+    registry,
     backend,
     journal,
     environment: { appVersion: "1.2.3-test", platform: "linux", isWayland: false },
   });
-  return { control, database, journal, harness, backend, engine };
+  return { control, database, journal, harness, registry, backend, engine };
 }
 
 async function makeRepository(): Promise<string> {

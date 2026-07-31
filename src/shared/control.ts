@@ -2,10 +2,12 @@ import { z } from "zod";
 import {
   artifactSchema,
   graphDefinitionSchema,
+  harnessIdSchema,
   runRecordSchema,
   runStatusSchema,
   type AppSnapshot,
   type GraphDefinition,
+  type HarnessId,
   type ModelOption,
   type OpenCodeStatus,
   type RunArtifacts,
@@ -13,6 +15,7 @@ import {
   type StartRunInput,
   type UpdateGraphInput,
 } from "./domain";
+import { harnessProbeStatusSchema } from "./harness";
 import {
   workspaceLayoutRecordSchema,
   type WorkspaceLayoutRecord,
@@ -136,14 +139,17 @@ export const graphIdInputSchema = z.strictObject({
 });
 
 export const harnessIdInputSchema = z.strictObject({
-  harnessId: z.string().min(1),
+  harnessId: harnessIdSchema,
 });
 
-/** Status of the single OpenCode harness Spire drives today. */
+/**
+ * Status of one harness in the multi-harness registry. The canonical status
+ * shape is `HarnessProbeStatus` from shared/harness.ts — do not re-declare it.
+ */
 export const harnessStatusSchema = z.strictObject({
-  id: z.literal("opencode"),
+  id: harnessIdSchema,
   name: z.string().min(1),
-  status: openCodeStatusSchema,
+  status: harnessProbeStatusSchema,
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
 
@@ -182,7 +188,7 @@ export type ControlOperationMap = {
   "layouts.save": { input: WorkspaceLayoutRecord; output: { saved: true } };
   "layouts.reset": { input: { graphId: string }; output: { reset: true } };
   "harnesses.list": { input: Record<string, never>; output: HarnessStatus[] };
-  "harnesses.models": { input: { harnessId: string }; output: ModelOption[] };
+  "harnesses.models": { input: { harnessId: HarnessId }; output: ModelOption[] };
   "traces.query": { input: TraceFilter; output: TracePage };
   "traces.tail": { input: TraceCursor; output: TracePage };
 };
