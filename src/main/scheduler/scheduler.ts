@@ -393,10 +393,73 @@ export class GraphScheduler {
       const active =
         activation === "any"
           ? incoming.some(pending)
-          : incoming.every(pending);
+          : (() => {
+              let hasPending = false;
+              for (const edge of incoming) {
+                if (pending(edge)) {
+                  hasPending = true;
+                  continue;
+                }
+                // A cycle back-edge whose source has never completed a visit
+                // and cannot be reached from any seed without passing through
+                // this node doesn't block activation: the source depends on the
+                // target being activated first, so it can't offer a token yet.
+                const source = byId.get(edge.source);
+                if (
+                  source &&
+                  this.completedVisits(source) === 0 &&
+                  !this.reachableFromSeed(
+                    plan.edges,
+                    seeds,
+                    edge.source,
+                    node.id,
+                  )
+                ) {
+                  continue;
+                }
+                // This edge is required and not pending — block.
+                return false;
+              }
+              // Require at least one real pending token so a node with only
+              // back-edges doesn't activate with no input from the seed set.
+              return hasPending;
+            })();
       if (active) ready.push(node);
     }
     return ready;
+  }
+
+  /**
+   * True when `source` can be reached from any seed node without passing
+   * through `excluded`. Used to distinguish true cycle back-edges (source
+   * depends on the target) from forward edges (source is independently
+   * activatable from the seed set).
+   */
+  private reachableFromSeed(
+    edges: CompiledGraph["edges"],
+    seeds: Set<string>,
+    source: string,
+    excluded: string,
+  ): boolean {
+    if (source === excluded) return false;
+    const adj = new Map<string, string[]>();
+    for (const edge of edges) {
+      const neighbors = adj.get(edge.source);
+      if (neighbors) neighbors.push(edge.target);
+      else adj.set(edge.source, [edge.target]);
+    }
+    const seen = new Set<string>();
+    const queue: string[] = [...seeds].filter((s) => s !== excluded);
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current === source) return true;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      for (const next of adj.get(current) ?? []) {
+        if (!seen.has(next) && next !== excluded) queue.push(next);
+      }
+    }
+    return false;
   }
 
   /**

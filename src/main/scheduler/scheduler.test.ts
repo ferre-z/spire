@@ -340,6 +340,47 @@ describe("GraphScheduler", () => {
     expect(nodeIds(adapter)).toEqual(["a", "b", "c"]);
   });
 
+  it("does not block an all-join on a cycle back-edge whose source is unvisited", async () => {
+    // Graph: implement → review → gate → {checkpoint, revise}
+    //        revise → review  (cycle back-edge, selected)
+    // review has activation "all" with two incoming edges:
+    //   implement → review (success, forward)
+    //   revise → review (selected, back-edge)
+    // When gate selects checkpoint, revise never runs — the back-edge
+    // never offers a token, but it must not block review's first activation.
+    const adapter = new FakeAdapter("opencode", [
+      ok("implement done"),
+      ok("review done"),
+      ok("gate done", ["gc"]),
+      ok("checkpoint done"),
+    ]);
+    const definition = graph(
+      [
+        agent("implement"),
+        agent("review", { activation: "all" }),
+        agent("gate"),
+        agent("revise"),
+        agent("checkpoint"),
+      ],
+      [
+        edge("ir", "implement", "review", "success"),
+        edge("rg", "review", "gate", "success"),
+        edge("gc", "gate", "checkpoint", "selected"),
+        edge("gr", "gate", "revise", "selected"),
+        edge("rr", "revise", "review", "selected"),
+      ],
+    );
+    const { scheduler, compiled, plan } = setup(definition, adapter);
+    const final = await scheduler.start(compiled, plan);
+    expect(final.status).toBe("succeeded");
+    expect(final.nodes.find((n) => n.nodeId === "review")?.status).toBe(
+      "succeeded",
+    );
+    expect(final.nodes.find((n) => n.nodeId === "revise")?.status).toBe(
+      "skipped",
+    );
+  });
+
   it("activates an any-join once when the first input completes", async () => {
     const adapter = new FakeAdapter("opencode");
     const definition = graph(
