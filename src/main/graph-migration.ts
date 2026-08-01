@@ -18,13 +18,22 @@ import {
  * - node.role              -> roleLabel
  * - role "planner"         -> read-only access
  * - role "implementer"     -> workspace-write access, writeScopes all files
- * - authority / activation / maxVisits take the v2 schema defaults
- *   (self scope with no actions, "all", 3).
+ * - activation             -> "any" (the legacy fixed loop fires a node
+ *   whenever any incoming condition triggers; the v2 default "all" would
+ *   deadlock the split handoff/revise edges below)
+ * - authority / maxVisits  -> v2 schema defaults (self scope with no
+ *   actions, 3)
  *
  * Edge condition mapping (edge ids and labels are preserved):
- * - "always"        -> when "always"
- * - "accepted"      -> when "success"
- * - "needs_changes" -> when "failure"
+ * - "always" planner -> implementer   -> when "selected" (the brief handoff:
+ *   the planner selects this edge in its NodeOutcome after writing the brief,
+ *   so a later review-accept does not refire the implementer — this preserves
+ *   the legacy early-accept termination)
+ * - "always" implementer -> planner   -> when "success" (a completed build
+ *   deterministically routes to review)
+ * - "always" anything else            -> when "always"
+ * - "accepted"                        -> when "success"
+ * - "needs_changes"                   -> when "failure"
  * Edge kind is inferred from the flow direction:
  * - planner -> implementer   -> "handoff"
  * - implementer -> planner   -> "review"
@@ -45,6 +54,22 @@ const LEGACY_WHEN_BY_CONDITION: Record<
   accepted: "success",
   needs_changes: "failure",
 };
+
+function legacyEdgeWhen(
+  edge: LegacyGraphEdge,
+  sourceRole: NodeRole,
+  targetRole: NodeRole,
+): GraphEdge["when"] {
+  if (edge.condition === "always") {
+    if (sourceRole === "planner" && targetRole === "implementer") {
+      return "selected";
+    }
+    if (sourceRole === "implementer" && targetRole === "planner") {
+      return "success";
+    }
+  }
+  return LEGACY_WHEN_BY_CONDITION[edge.condition];
+}
 
 function legacyEdgeKind(
   sourceRole: NodeRole,
@@ -71,9 +96,10 @@ export function migrateLegacyGraph(
     job: node.instructions,
     harnessId: "opencode" as const,
     modelId: node.model,
+    activation: "any" as const,
     access:
       node.role === "implementer"
-        ? { mode: "workspace-write" as const, writeScopes: ["**/*"] }
+        ? { mode: "workspace-write" as const, writeScopes: ["."] }
         : { mode: "read-only" as const, writeScopes: [] },
     position: { x: node.position.x, y: node.position.y },
   }));
@@ -85,7 +111,11 @@ export function migrateLegacyGraph(
       rolesById.get(edge.source) ?? "planner",
       rolesById.get(edge.target) ?? "implementer",
     ),
-    when: LEGACY_WHEN_BY_CONDITION[edge.condition],
+    when: legacyEdgeWhen(
+      edge,
+      rolesById.get(edge.source) ?? "planner",
+      rolesById.get(edge.target) ?? "implementer",
+    ),
     label: edge.label,
   }));
   return graphDefinitionV2Schema.parse({

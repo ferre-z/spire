@@ -2,11 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { CollaborationMessage } from "../shared/collaboration";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphDefinition } from "../shared/domain";
 import type {
   AppliedPlanPatch,
+  CollaborationMessageDraft,
   ExecutionPlan,
   NodeExecution,
 } from "../shared/execution";
@@ -237,15 +237,10 @@ function planFixture(overrides: Partial<ExecutionPlan> = {}): ExecutionPlan {
   };
 }
 
-function messageFixture(
-  overrides: Partial<CollaborationMessage> = {},
-): CollaborationMessage {
+function messageDraft(
+  overrides: Partial<CollaborationMessageDraft> = {},
+): CollaborationMessageDraft {
   return {
-    id: "msg-1",
-    runId: "run-1",
-    senderNodeId: "planner",
-    sequence: 0,
-    createdAt: "2026-07-30T10:01:00.000Z",
     recipient: { kind: "node", id: "implementer" },
     kind: "handoff",
     subject: "Brief ready",
@@ -322,6 +317,24 @@ describe("SpireDatabase graph v2", () => {
     const broken = { ...migrateLegacyGraph(legacyGraphFixture), maxSteps: 0 };
     expect(() => database.saveGraphV2(broken as never)).toThrowError();
     expect(database.listGraphsV2()).toHaveLength(0);
+  });
+
+  it("skips a corrupt row instead of failing the whole v2 listing", () => {
+    database.saveGraph(legacyGraphFixture);
+    // A row that parses as neither the legacy nor the v2 schema.
+    database.saveGraph({
+      id: "corrupt",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      nodes: "not-a-node-list",
+    } as never);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const graphs = database.listGraphsV2();
+    expect(graphs).toHaveLength(1);
+    expect(graphs[0]).toEqual(migrateLegacyGraph(legacyGraphFixture));
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 
@@ -406,20 +419,66 @@ describe("SpireDatabase execution state", () => {
   });
 
   it("round-trips collaboration messages ordered by sequence", () => {
-    database.appendCollaborationMessage(
-      messageFixture({
-        id: "msg-2",
-        sequence: 1,
+    const first = database.appendCollaborationMessage(
+      "run-1",
+      messageDraft(),
+      "planner",
+    );
+    const second = database.appendCollaborationMessage(
+      "run-1",
+      messageDraft({
         recipient: { kind: "successors" },
         kind: "report",
         subject: "Done",
       }),
+      "implementer",
     );
-    database.appendCollaborationMessage(messageFixture());
     const messages = database.listCollaborationMessages("run-1");
-    expect(messages.map((message) => message.id)).toEqual(["msg-1", "msg-2"]);
-    expect(messages[0]).toEqual(messageFixture());
+    expect(messages).toEqual([first, second]);
+    expect(messages.map((message) => message.sequence)).toEqual([0, 1]);
+    expect(messages.map((message) => message.id)).toEqual(["run-1:0", "run-1:1"]);
+    expect(messages[0]).toMatchObject({
+      runId: "run-1",
+      senderNodeId: "planner",
+      subject: "Brief ready",
+      recipient: messageDraft().recipient,
+    });
     expect(database.listCollaborationMessages("run-other")).toEqual([]);
+  });
+
+  it("allocates unique, monotonic sequences across concurrent sends (no pre-allocation)", async () => {
+    // Reproduces the cross-plane race: a scheduler per-run delivery batch and a
+    // control-plane send both append to one run. Each send yields once (the
+    // scheduler awaits between drafts; the control plane awaits its workspace
+    // deliver) before calling the DB, so sequence allocation must be owned by
+    // the DB transaction — not pre-allocated from list().length — or two callers
+    // read the same length and collide on the (run_id, sequence) primary key.
+    const draft = (subject: string) => ({
+      recipient: { kind: "successors" } as const,
+      kind: "report" as const,
+      subject,
+      body: "",
+      artifactPaths: [] as string[],
+    });
+    const sent: number[] = [];
+    const send = async (subject: string) => {
+      await Promise.resolve();
+      const message = database.appendCollaborationMessage(
+        "run-1",
+        draft(subject),
+        "planner",
+      );
+      sent.push(message.sequence);
+    };
+    await Promise.all([send("a"), send("b"), send("c")]);
+    expect(sent.sort((x, y) => x - y)).toEqual([0, 1, 2]);
+    const persisted = database.listCollaborationMessages("run-1");
+    expect(persisted.map((message) => message.sequence)).toEqual([0, 1, 2]);
+    expect(persisted.map((message) => message.id)).toEqual([
+      "run-1:0",
+      "run-1:1",
+      "run-1:2",
+    ]);
   });
 
   it("round-trips applied plan patches ordered by revision", () => {
@@ -498,7 +557,7 @@ describe("SpireDatabase execution state", () => {
       status: "succeeded",
       visits: 1,
     });
-    database.appendCollaborationMessage(messageFixture());
+    database.appendCollaborationMessage("run-1", messageDraft(), "planner");
     database.savePlanPatch("run-1", patchFixture());
     database.saveHarnessSession(sessionFixture());
     database.close();
@@ -509,11 +568,102 @@ describe("SpireDatabase execution state", () => {
       { nodeId: "planner", status: "succeeded", visits: 1 },
     ]);
     expect(database.listCollaborationMessages("run-1")).toEqual([
-      messageFixture(),
+      expect.objectContaining({
+        runId: "run-1",
+        senderNodeId: "planner",
+        sequence: 0,
+        subject: "Brief ready",
+        kind: "handoff",
+        recipient: { kind: "node", id: "implementer" },
+      }),
     ]);
     expect(database.listPlanPatches("run-1")).toEqual([patchFixture()]);
     expect(database.getHarnessSession("run-1", "implementer")).toEqual(
       sessionFixture(),
     );
+  });
+
+  it("keeps the first write of every plan revision as its snapshot", () => {
+    database.saveExecutionPlan(planFixture({ revision: 0, patches: [] }));
+    // Later writes at the same revision do not replace the snapshot.
+    database.saveExecutionPlan(planFixture({ revision: 0, patches: [] }));
+    database.saveExecutionPlan(planFixture({ revision: 1, stepCount: 9 }));
+    database.saveExecutionPlan(planFixture({ revision: 1, stepCount: 10 }));
+
+    expect(database.getExecutionPlanRevision("run-1", 0)?.revision).toBe(0);
+    expect(database.getExecutionPlanRevision("run-1", 0)?.patches).toEqual([]);
+    // First write wins: the revision-1 snapshot has stepCount 9, not 10.
+    expect(database.getExecutionPlanRevision("run-1", 1)?.stepCount).toBe(9);
+    expect(database.getExecutionPlanRevision("run-1", 2)).toBeUndefined();
+    expect(
+      database.getExecutionPlanRevision("run-other", 0),
+    ).toBeUndefined();
+    // The live plan still tracks the latest write.
+    expect(database.getExecutionPlan("run-1")?.stepCount).toBe(10);
+  });
+
+  it("persists a patched plan, its audit row, and node changes atomically", () => {
+    database.saveExecutionPlan(planFixture({ revision: 0, patches: [] }));
+    database.saveNodeExecution("run-1", {
+      nodeId: "planner",
+      status: "succeeded",
+      visits: 1,
+    });
+    database.saveNodeExecution("run-1", {
+      nodeId: "implementer",
+      status: "waiting",
+      visits: 0,
+    });
+
+    const patched = planFixture({
+      revision: 1,
+      nodes: [{ nodeId: "planner", status: "succeeded", visits: 1 }],
+    });
+    database.savePatchedPlan(patched, patchFixture(), {
+      removedNodeIds: ["implementer"],
+      changedNodes: [{ nodeId: "planner", status: "succeeded", visits: 1 }],
+    });
+
+    expect(database.getExecutionPlan("run-1")).toEqual(patched);
+    expect(database.listPlanPatches("run-1")).toEqual([patchFixture()]);
+    // The dropped node's row is gone; the changed node's row is current.
+    expect(database.listNodeExecutions("run-1")).toEqual([
+      { nodeId: "planner", status: "succeeded", visits: 1 },
+    ]);
+    // The patch revision's snapshot is the post-patch state.
+    expect(database.getExecutionPlanRevision("run-1", 1)).toEqual(patched);
+  });
+
+  it("marks the rolled-back patch inside the rollback transaction", () => {
+    database.saveExecutionPlan(planFixture({ revision: 0, patches: [] }));
+    database.savePatchedPlan(planFixture(), patchFixture());
+
+    const rollback = patchFixture({
+      id: "patch-2",
+      baseRevision: 1,
+      appliedRevision: 2,
+      appliedAt: "2026-07-30T10:06:00.000Z",
+      reason: "Rollback of patch-1.",
+      operations: [{ action: "retry", nodeId: "planner" }],
+    });
+    database.savePatchedPlan(planFixture({ revision: 2 }), rollback, {
+      rolledBackPatchId: "patch-1",
+    });
+
+    const patches = database.listPlanPatches("run-1");
+    expect(patches).toHaveLength(2);
+    expect(patches[0].rolledBackBy).toBe("patch-2");
+    expect(patches[1]).toEqual(rollback);
+  });
+
+  it("rolls back every write when a patched-plan write fails", () => {
+    const original = planFixture({ revision: 0, patches: [] });
+    database.saveExecutionPlan(original);
+    const invalidPatch = { ...patchFixture(), appliedRevision: 0 };
+    expect(() =>
+      database.savePatchedPlan(planFixture(), invalidPatch),
+    ).toThrowError();
+    expect(database.getExecutionPlan("run-1")).toEqual(original);
+    expect(database.listPlanPatches("run-1")).toEqual([]);
   });
 });

@@ -125,39 +125,42 @@ describe("migrateLegacyGraph", () => {
     });
     expect(agentNode(migrated, "implementer").access).toEqual({
       mode: "workspace-write",
-      writeScopes: ["**/*"],
+      writeScopes: ["."],
     });
   });
 
-  it("applies default authority, activation, and maxVisits", () => {
+  it("applies default authority, any-activation, and maxVisits", () => {
     const migrated = migrateLegacyGraph(legacyGraph);
     for (const id of ["planner", "implementer"]) {
       const node = agentNode(migrated, id);
       expect(node.authority).toEqual({ scope: "self", actions: [] });
-      expect(node.activation).toBe("all");
+      // The legacy fixed loop fires a node when any incoming condition
+      // triggers, so legacy nodes migrate to "any" activation.
+      expect(node.activation).toBe("any");
       expect(node.maxVisits).toBe(3);
     }
   });
 
-  it("converts edge conditions without changing edge ids or labels", () => {
+  it("converts edge conditions direction-aware without changing ids or labels", () => {
     const migrated = migrateLegacyGraph(legacyGraph);
     const byId = new Map(migrated.edges.map((edge) => [edge.id, edge]));
     expect(migrated.edges).toHaveLength(4);
 
-    // planner -> implementer flow becomes a handoff.
+    // planner -> implementer "always" is the brief handoff: the planner
+    // selects it explicitly, so a later review-accept does not refire it.
     expect(byId.get("plan-build")).toMatchObject({
       source: "planner",
       target: "implementer",
       kind: "handoff",
-      when: "always",
+      when: "selected",
       label: "task brief",
     });
-    // implementer -> planner flow becomes a review.
+    // implementer -> planner "always" means a completed build routes to review.
     expect(byId.get("build-review")).toMatchObject({
       source: "implementer",
       target: "planner",
       kind: "review",
-      when: "always",
+      when: "success",
       label: "review",
     });
     // needs_changes maps to a failure route.

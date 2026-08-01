@@ -1,10 +1,29 @@
 import type {
   AppSnapshot,
   GraphDefinition,
+  GraphDefinitionV2,
+  HarnessId,
+  ModelOption,
   ProviderInput,
   RunEvent,
   StartRunInput,
 } from "./domain";
+import type {
+  AppliedPlanPatch,
+  ExecutionPlan,
+} from "./execution";
+import type {
+  GraphValidation,
+  HarnessStatus,
+  MessagePage,
+  NodeExecutionPage,
+  PlanPatchInput,
+  PlanPromoteInput,
+  PlanRollbackInput,
+  RunScopedPageInput,
+  SendMessageInput,
+  SentMessage,
+} from "./control";
 import type { TraceEvent, TraceFilter, TracePage } from "./trace";
 import type {
   WorkspaceEnvironment,
@@ -18,7 +37,7 @@ export interface SpireApi {
   detectOpenCode(): Promise<AppSnapshot>;
   connectOpenRouter(input: ProviderInput): Promise<AppSnapshot>;
   chooseRepository(): Promise<string | null>;
-  saveGraph(graph: GraphDefinition): Promise<AppSnapshot>;
+  saveGraph(graph: GraphDefinition | GraphDefinitionV2): Promise<AppSnapshot>;
   startRun(input: StartRunInput): Promise<AppSnapshot>;
   stopRun(runId: string): Promise<AppSnapshot>;
   retryRun(runId: string): Promise<AppSnapshot>;
@@ -33,6 +52,17 @@ export interface SpireApi {
   queryTraces(filter: TraceFilter): Promise<TracePage>;
   onRunEvent(listener: (event: RunEvent) => void): Unsubscribe;
   onTraceEvent(listener: (event: TraceEvent) => void): Unsubscribe;
+  graphsValidate(graph: Record<string, unknown>): Promise<GraphValidation>;
+  harnessesList(): Promise<HarnessStatus[]>;
+  harnessesModels(harnessId: HarnessId): Promise<ModelOption[]>;
+  runsPlanGet(runId: string): Promise<ExecutionPlan>;
+  runsNodesList(input: RunScopedPageInput): Promise<NodeExecutionPage>;
+  runsMessagesList(input: RunScopedPageInput): Promise<MessagePage>;
+  runsMessagesSend(input: SendMessageInput): Promise<SentMessage>;
+  runsPlanPatch(input: PlanPatchInput): Promise<AppliedPlanPatch>;
+  runsPlanRollback(input: PlanRollbackInput): Promise<AppliedPlanPatch>;
+  runsCheckpointResume(runId: string): Promise<ExecutionPlan>;
+  runsPlanPromote(input: PlanPromoteInput): Promise<GraphDefinitionV2>;
 }
 
 export const IPC = {
@@ -55,4 +85,15 @@ export const IPC = {
   queryTraces: "spire:query-traces",
   runEvent: "spire:run-event",
   traceEvent: "spire:trace-event",
+  graphsValidate: "spire:graphs-validate",
+  harnessesList: "spire:harnesses-list",
+  harnessesModels: "spire:harnesses-models",
+  runsPlanGet: "spire:runs-plan-get",
+  runsNodesList: "spire:runs-nodes-list",
+  runsMessagesList: "spire:runs-messages-list",
+  runsMessagesSend: "spire:runs-messages-send",
+  runsPlanPatch: "spire:runs-plan-patch",
+  runsPlanRollback: "spire:runs-plan-rollback",
+  runsCheckpointResume: "spire:runs-checkpoint-resume",
+  runsPlanPromote: "spire:runs-plan-promote",
 } as const;

@@ -100,6 +100,17 @@ export type HarnessProbeStatus = {
   error?: string;
 };
 
+/** Canonical harness status contract; shared/control.ts builds on this. */
+export const harnessProbeStatusSchema = z.strictObject({
+  harnessId: harnessIdSchema,
+  installed: z.boolean(),
+  binaryPath: z.string().optional(),
+  version: z.string().optional(),
+  compatible: z.boolean(),
+  connected: z.boolean(),
+  error: z.string().optional(),
+}) satisfies z.ZodType<HarnessProbeStatus>;
+
 export type HarnessRunInput = {
   runId: string;
   nodeId: string;

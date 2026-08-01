@@ -8,17 +8,26 @@ import {
   type ControlOperationName,
   type Diagnostics,
   type GraphPage,
+  type GraphValidation,
   type HarnessStatus,
+  type MessagePage,
+  type NodeExecutionPage,
+  type SentMessage,
   type RepositoryValidation,
   type RunPage,
 } from "../shared/control";
 import type {
   AppSnapshot,
   GraphDefinition,
+  GraphDefinitionV2,
   ModelOption,
   RunArtifacts,
   RunRecord,
 } from "../shared/domain";
+import type {
+  AppliedPlanPatch,
+  ExecutionPlan,
+} from "../shared/execution";
 import type { TracePage } from "../shared/trace";
 import type { WorkspaceLayoutRecord } from "../shared/workspace";
 import {
@@ -60,6 +69,15 @@ export const TOOL_NAMES: Record<ControlOperationName, string> = {
   "harnesses.models": "spire_harnesses_models",
   "traces.query": "spire_traces_query",
   "traces.tail": "spire_traces_tail",
+  "graphs.validate": "spire_graphs_validate",
+  "runs.plan.get": "spire_runs_plan_get",
+  "runs.nodes.list": "spire_runs_nodes_list",
+  "runs.messages.list": "spire_runs_messages_list",
+  "runs.messages.send": "spire_runs_messages_send",
+  "runs.plan.patch": "spire_runs_plan_patch",
+  "runs.plan.rollback": "spire_runs_plan_rollback",
+  "runs.checkpoint.resume": "spire_runs_checkpoint_resume",
+  "runs.plan.promote": "spire_runs_plan_promote",
 };
 
 const TOOL_DESCRIPTIONS: Record<ControlOperationName, string> = {
@@ -83,6 +101,15 @@ const TOOL_DESCRIPTIONS: Record<ControlOperationName, string> = {
   "harnesses.models": "List the models a harness offers.",
   "traces.query": "Query the redacted execution trace journal with filters.",
   "traces.tail": "Read trace events after a journal sequence number.",
+  "graphs.validate": "Validate a graph v2 definition against the schema and semantic rules.",
+  "runs.plan.get": "Get the persisted execution plan for a run.",
+  "runs.nodes.list": "List node executions for a run (paginated).",
+  "runs.messages.list": "List collaboration messages for a run (paginated).",
+  "runs.messages.send": "Send a collaboration message to a run's inboxes.",
+  "runs.plan.patch": "Apply an authorized plan patch to a run's execution plan.",
+  "runs.plan.rollback": "Roll back an applied plan patch (destructive).",
+  "runs.checkpoint.resume": "Resume a run paused at a manual checkpoint.",
+  "runs.plan.promote": "Save the live plan topology as a new saved graph version.",
 };
 
 export type McpToolDefinition = {
@@ -132,8 +159,8 @@ export const MCP_TOOLS: McpToolDefinition[] = (
   };
 });
 
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+function plural(count: number, noun: string, explicitPlural?: string): string {
+  return `${count} ${count === 1 ? noun : (explicitPlural ?? noun + "s")}`;
 }
 
 /** Concise one-line summary of a control output, for tool text content. */
@@ -249,6 +276,46 @@ export function summarizeToolResult(
         ? `, next cursor ${page.nextCursor.afterSequence}`
         : "";
       return `${plural(page.events.length, "trace event")}${more}.`;
+    }
+    case "graphs.validate": {
+      const result = output as GraphValidation;
+      return result.valid
+        ? "Graph definition is valid."
+        : `${plural(result.issues.length, "issue")}: ${result.issues.join("; ")}.`;
+    }
+    case "runs.plan.get": {
+      const plan = output as ExecutionPlan;
+      return `Plan revision ${plan.revision}, status ${plan.status}, ${plural(plan.nodes.length, "node")}, ${plural(plan.patches.length, "patch", "patches")}.`;
+    }
+    case "runs.nodes.list": {
+      const page = output as NodeExecutionPage;
+      const more = page.nextCursor ? " (more available)" : "";
+      return `${plural(page.nodes.length, "node")}${more}.`;
+    }
+    case "runs.messages.list": {
+      const page = output as MessagePage;
+      const more = page.nextCursor ? " (more available)" : "";
+      return `${plural(page.messages.length, "message")}${more}.`;
+    }
+    case "runs.messages.send": {
+      const result = output as SentMessage;
+      return `Message ${result.messageId} (seq ${result.sequence}) sent to run.`;
+    }
+    case "runs.plan.patch": {
+      const patch = output as AppliedPlanPatch;
+      return `Patch ${patch.id} applied at revision ${patch.appliedRevision}.`;
+    }
+    case "runs.plan.rollback": {
+      const patch = output as AppliedPlanPatch;
+      return `Patch ${patch.id} rolled back at revision ${patch.appliedRevision}.`;
+    }
+    case "runs.checkpoint.resume": {
+      const plan = output as ExecutionPlan;
+      return `Resumed run at plan revision ${plan.revision}, status ${plan.status}.`;
+    }
+    case "runs.plan.promote": {
+      const graph = output as GraphDefinitionV2;
+      return `Promoted plan to graph "${graph.name}" v${graph.version}.`;
     }
   }
 }

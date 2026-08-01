@@ -12,6 +12,7 @@ import {
   executionPlanSchema,
   nodeExecutionSchema,
   type AppliedPlanPatch,
+  type CollaborationMessageDraft,
   type ExecutionPlan,
   type NodeExecution,
 } from "../shared/execution";
@@ -72,6 +73,12 @@ export class SpireDatabase {
         revision INTEGER NOT NULL,
         updated_at TEXT NOT NULL,
         json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS plan_revisions (
+        run_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        json TEXT NOT NULL,
+        PRIMARY KEY (run_id, revision)
       );
       CREATE TABLE IF NOT EXISTS node_executions (
         run_id TEXT NOT NULL,
@@ -259,14 +266,26 @@ export class SpireDatabase {
 
   /**
    * List every stored graph as graph v2. Rows saved by legacy callers are
-   * normalized on read; rows saved via saveGraphV2 are returned as-is.
+   * normalized on read; rows saved via saveGraphV2 are returned as-is. A
+   * single corrupt or unparseable row is skipped with a warning rather than
+   * failing the whole listing.
    */
   listGraphsV2(): GraphDefinitionV2[] {
-    return (
-      this.db
-        .prepare("SELECT json FROM graphs ORDER BY created_at DESC")
-        .all() as JsonRow[]
-    ).map((row) => readGraphDefinition(JSON.parse(row.json)));
+    const rows = this.db
+      .prepare("SELECT json FROM graphs ORDER BY created_at DESC")
+      .all() as JsonRow[];
+    const graphs: GraphDefinitionV2[] = [];
+    for (const row of rows) {
+      try {
+        graphs.push(readGraphDefinition(JSON.parse(row.json)));
+      } catch (error) {
+        console.warn(
+          "Skipping corrupt graph row:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    return graphs;
   }
 
   saveExecutionPlan(plan: ExecutionPlan): void {
@@ -286,6 +305,31 @@ export class SpireDatabase {
         validated.updatedAt,
         JSON.stringify(validated),
       );
+    // Keep the first write of every revision as its immutable snapshot.
+    // Topology is constant within a revision (only patches change it, and
+    // they bump the revision), so the snapshot is what rollback restores.
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO plan_revisions (run_id, revision, json)
+         VALUES (?, ?, ?)`,
+      )
+      .run(validated.runId, validated.revision, JSON.stringify(validated));
+  }
+
+  /**
+   * The immutable snapshot of a plan revision (first write wins), or
+   * undefined when the revision predates revision history.
+   */
+  getExecutionPlanRevision(
+    runId: string,
+    revision: number,
+  ): ExecutionPlan | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT json FROM plan_revisions WHERE run_id = ? AND revision = ?",
+      )
+      .get(runId, revision) as JsonRow | undefined;
+    return row ? executionPlanSchema.parse(JSON.parse(row.json)) : undefined;
   }
 
   getExecutionPlan(runId: string): ExecutionPlan | undefined {
@@ -337,19 +381,45 @@ export class SpireDatabase {
     })();
   }
 
-  appendCollaborationMessage(message: CollaborationMessage): void {
-    const validated = collaborationMessageSchema.parse(message);
-    this.db
-      .prepare(
-        `INSERT INTO collaboration_messages (run_id, sequence, created_at, json)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(
-        validated.runId,
-        validated.sequence,
-        validated.createdAt,
-        JSON.stringify(validated),
-      );
+  /**
+   * Persist a collaboration message atomically: the next sequence number
+   * (max existing sequence for the run + 1) and the INSERT happen in a single
+   * transaction, so concurrent callers — the scheduler's per-run delivery
+   * batch and a control-plane send — can never read the same length and collide
+   * on the (run_id, sequence) primary key. Callers must not pre-allocate the
+   * sequence; the returned message carries the canonical id (`<runId>:<seq>`)
+   * and timestamp, which the workspace filenames are derived from.
+   */
+  appendCollaborationMessage(
+    runId: string,
+    draft: CollaborationMessageDraft,
+    senderNodeId: string,
+  ): CollaborationMessage {
+    return this.db.transaction(() => {
+      const row = this.db
+        .prepare(
+          "SELECT max(sequence) AS seq FROM collaboration_messages WHERE run_id = ?",
+        )
+        .get(runId) as { seq: number | null } | undefined;
+      const sequence = (row?.seq ?? -1) + 1;
+      const createdAt = new Date().toISOString();
+      const message: CollaborationMessage = {
+        ...draft,
+        id: `${runId}:${sequence}`,
+        runId,
+        senderNodeId,
+        sequence,
+        createdAt,
+      };
+      const validated = collaborationMessageSchema.parse(message);
+      this.db
+        .prepare(
+          `INSERT INTO collaboration_messages (run_id, sequence, created_at, json)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(runId, sequence, createdAt, JSON.stringify(validated));
+      return validated;
+    })();
   }
 
   listCollaborationMessages(runId: string): CollaborationMessage[] {
@@ -388,6 +458,64 @@ export class SpireDatabase {
         )
         .all(runId) as JsonRow[]
     ).map((row) => appliedPlanPatchSchema.parse(JSON.parse(row.json)));
+  }
+
+  /**
+   * Persist a patch application atomically: the new plan revision, the patch
+   * audit row, deletion of execution rows for nodes the patch dropped,
+   * upserts of executions the patch changed, and — for rollbacks — the
+   * rolled-back marker on the original patch. Either every write lands or
+   * none does (a multi-operation patch never partially persists).
+   */
+  savePatchedPlan(
+    plan: ExecutionPlan,
+    patch: AppliedPlanPatch,
+    options: {
+      removedNodeIds?: string[];
+      changedNodes?: NodeExecution[];
+      rolledBackPatchId?: string;
+    } = {},
+  ): void {
+    this.db.transaction(() => {
+      this.saveExecutionPlan(plan);
+      this.savePlanPatch(plan.runId, patch);
+      for (const nodeId of options.removedNodeIds ?? []) {
+        this.db
+          .prepare(
+            "DELETE FROM node_executions WHERE run_id = ? AND node_id = ?",
+          )
+          .run(plan.runId, nodeId);
+      }
+      for (const node of options.changedNodes ?? []) {
+        this.saveNodeExecution(plan.runId, node);
+      }
+      if (options.rolledBackPatchId) {
+        this.markPlanPatchRolledBack(
+          plan.runId,
+          options.rolledBackPatchId,
+          patch.id,
+        );
+      }
+    })();
+  }
+
+  private markPlanPatchRolledBack(
+    runId: string,
+    patchId: string,
+    rolledBackBy: string,
+  ): void {
+    const row = this.db
+      .prepare("SELECT json FROM plan_patches WHERE run_id = ? AND id = ?")
+      .get(runId, patchId) as JsonRow | undefined;
+    if (!row) throw new Error(`Unknown plan patch ${patchId}.`);
+    const patch = {
+      ...(JSON.parse(row.json) as AppliedPlanPatch),
+      rolledBackBy,
+    };
+    const validated = appliedPlanPatchSchema.parse(patch);
+    this.db
+      .prepare("UPDATE plan_patches SET json = ? WHERE run_id = ? AND id = ?")
+      .run(JSON.stringify(validated), runId, patchId);
   }
 
   saveHarnessSession(session: HarnessSession): void {

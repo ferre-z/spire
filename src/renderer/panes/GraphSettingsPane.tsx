@@ -1,5 +1,5 @@
 import { GitCompare, Save } from "lucide-react";
-import { useAppStore } from "../store";
+import { isGraphV2, useAppStore } from "../store";
 
 export function useSaveGraph() {
   const graph = useAppStore((state) => state.graph)!;
@@ -37,21 +37,27 @@ export function GraphSettingsPane() {
         />
       </div>
       <div className="setting-block">
-        <label>MAX IMPLEMENTATION PASSES</label>
+        <label>
+          {isGraphV2(graph) ? "MAX STEPS" : "MAX IMPLEMENTATION PASSES"}
+        </label>
         <div className="range-row">
           <input
             type="range"
             min={1}
-            max={5}
-            value={graph.maxIterations}
-            onChange={(event) =>
-              updateGraph({
-                ...graph,
-                maxIterations: Number(event.target.value),
-              })
-            }
+            max={isGraphV2(graph) ? graph.maxSteps : graph.maxIterations}
+            value={isGraphV2(graph) ? graph.maxSteps : graph.maxIterations}
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (isGraphV2(graph)) {
+                updateGraph({ ...graph, maxSteps: value });
+              } else {
+                updateGraph({ ...graph, maxIterations: value });
+              }
+            }}
           />
-          <strong>{graph.maxIterations}</strong>
+          <strong>
+            {isGraphV2(graph) ? graph.maxSteps : graph.maxIterations}
+          </strong>
         </div>
       </div>
       <div className="graph-rule">

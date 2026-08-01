@@ -112,6 +112,26 @@ export const nodeExecutionSchema = z.strictObject({
   nodeId: z.string().min(1),
   status: nodeExecutionStatusSchema,
   visits: z.number().int().nonnegative(),
+  /**
+   * Per-edge count of tokens this node has offered on outgoing edges across
+   * its completed visits. For `success`/`failure`/`selected` edges, only visits
+   * whose outcome satisfies the condition offer a token; for `always` edges,
+   * every completed visit offers one. This per-visit, per-edge precision
+   * prevents phantom tokens: a node that failed then succeeded does not
+   * retroactively offer a success token from its failed visit. Absent for
+   * executions created before this field existed; the scheduler falls back to
+   * the `completedVisits` approximation for backward compatibility.
+   */
+  tokensOffered: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  /**
+   * Per-edge count of tokens this node has consumed from incoming edges. Each
+   * node visit consumes one token from each incoming edge that has an unspent
+   * token, so a condition edge that offered a token but was not the actual
+   * trigger for this visit does not lose its token to a later unaffordably-high
+   * `target.visits` count. Absent for executions created before this field
+   * existed; the scheduler falls back to per-visit consumption.
+   */
+  tokensConsumed: z.record(z.string(), z.number().int().nonnegative()).optional(),
   outcome: nodeOutcomeSchema.optional(),
   error: z.string().optional(),
 });

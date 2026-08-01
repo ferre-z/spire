@@ -1,44 +1,92 @@
 import path from "node:path";
-import { mkdtemp } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphDefinition } from "../shared/domain";
-import { SpireDatabase } from "./database";
+import type { NodeOutcome } from "../shared/execution";
 import type {
-  AgentHarness,
-  HarnessPrompt,
-  HarnessResponse,
-} from "./harness/opencode";
+  HarnessAdapter,
+  HarnessProbeStatus,
+  HarnessRunInput,
+  HarnessRunResult,
+  HarnessSessionRef,
+} from "../shared/harness";
+import { SpireDatabase } from "./database";
+import { createHarnessRegistry } from "./harness/registry";
 import { RunEngine } from "./run-engine";
 import { REDACTED, type TraceJournal } from "./trace-journal";
-import type { ExecutionBackend, PreparedWorkspace } from "./worktree";
+import {
+  LocalWorktreeBackend,
+  type ExecutionBackend,
+  type PreparedWorkspace,
+} from "./worktree";
 
-class FakeHarness implements AgentHarness {
+const exec = promisify(execFile);
+
+function ok(summary = "done"): NodeOutcome {
+  return {
+    status: "succeeded",
+    summary,
+    artifacts: [],
+    messages: [],
+    selectedEdgeIds: [],
+  };
+}
+
+function select(edgeIds: string[], summary = "done"): NodeOutcome {
+  return { ...ok(summary), selectedEdgeIds: edgeIds };
+}
+
+function rejected(summary = "needs changes"): NodeOutcome {
+  return { ...ok(summary), status: "failed" };
+}
+
+class FakeAdapter implements HarnessAdapter {
+  readonly id = "opencode" as const;
+  readonly calls: HarnessRunInput[] = [];
+  readonly abortCalls: HarnessSessionRef[] = [];
   private index = 0;
 
-  constructor(private readonly answers: string[]) {}
+  constructor(
+    private readonly outputs: unknown[] = [],
+    private readonly hang = false,
+    private readonly sideEffect?: (input: HarnessRunInput) => Promise<void> | void,
+  ) {}
 
-  async detect() {
+  async probe(): Promise<HarnessProbeStatus> {
     return {
+      harnessId: "opencode",
       installed: true,
       compatible: true,
       connected: true,
     };
   }
-  async connectOpenRouter() {}
-  async models() {
+  async listModels() {
     return [];
   }
-  async prompt(input: HarnessPrompt): Promise<HarnessResponse> {
-    input.onSession?.(input.sessionId ?? `session-${this.index}`);
-    input.onEvent("tool", "fake tool completed");
-    return {
-      sessionId: input.sessionId ?? `session-${this.index}`,
-      text: this.answers[this.index++],
+  run(input: HarnessRunInput): Promise<HarnessRunResult> {
+    this.calls.push(input);
+    const ref: HarnessSessionRef = {
+      harnessId: "opencode",
+      sessionId: input.session?.sessionId ?? `session-${this.index}`,
+      directory: input.directory,
     };
+    input.onSession(ref);
+    if (this.hang) return new Promise<HarnessRunResult>(() => undefined);
+    input.onEvent({ type: "tool_result", tool: "fake", output: "done" });
+    const output = this.outputs[this.index] ?? ok(`output-${this.index}`);
+    this.index += 1;
+    return Promise.resolve(this.sideEffect?.(input)).then(() => ({
+      session: ref,
+      output,
+    }));
   }
-  async abort() {}
-  close() {}
+  async abort(session: HarnessSessionRef): Promise<void> {
+    this.abortCalls.push(session);
+  }
+  async close(): Promise<void> {}
 }
 
 class FakeBackend implements ExecutionBackend {
@@ -94,49 +142,44 @@ function graph(maxIterations = 3): GraphDefinition {
         condition: "always",
         label: "review",
       },
+      {
+        id: "revise",
+        source: "planner",
+        target: "implementer",
+        condition: "needs_changes",
+        label: "revise",
+      },
     ],
   };
 }
 
-const brief = JSON.stringify({
-  goal: "Add value",
-  constraints: [],
-  acceptanceChecks: ["value exists"],
-  implementationNotes: [],
-});
-const implementation = JSON.stringify({
-  summary: "Added value",
-  changedFiles: ["src/value.ts"],
-  validations: [{ command: "pnpm test", status: "passed" }],
-  blockers: [],
-});
+function setup(
+  adapter: FakeAdapter,
+  database?: SpireDatabase,
+  journal?: TraceJournal,
+) {
+  const db = database ?? new SpireDatabase(":memory:");
+  const events: string[] = [];
+  const engine = new RunEngine(
+    db,
+    createHarnessRegistry([adapter]),
+    new FakeBackend(),
+    (event) => events.push(event.kind),
+    journal,
+  );
+  return { database: db, engine, events };
+}
 
 describe("RunEngine", () => {
-  it("executes a review/revision cycle and succeeds", async () => {
+  it("runs a legacy two-node graph to first-pass accept in three node calls", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "spire-engine-"));
     const database = new SpireDatabase(path.join(directory, "test.sqlite"));
-    const harness = new FakeHarness([
-      brief,
-      implementation,
-      JSON.stringify({
-        decision: "needs_changes",
-        evidence: ["missing docs"],
-        feedback: ["add docs"],
-      }),
-      implementation,
-      JSON.stringify({
-        decision: "accepted",
-        evidence: ["value exists"],
-        feedback: [],
-      }),
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("built"),
+      ok("accepted"),
     ]);
-    const events: string[] = [];
-    const engine = new RunEngine(
-      database,
-      harness,
-      new FakeBackend(),
-      (event) => events.push(event.kind),
-    );
+    const { engine, events } = setup(adapter, database);
     const run = await engine.start({
       graph: graph(),
       repositoryPath: "/tmp/repository",
@@ -148,30 +191,98 @@ describe("RunEngine", () => {
       { timeout: 3000 },
     );
     const saved = database.getRun(run.id)!;
-    expect(saved.iteration).toBe(2);
     expect(saved.artifacts?.changedFiles).toEqual(["src/value.ts"]);
-    expect(events).toContain("transition");
+    expect(events).toContain("status");
+
+    // The run compiled a persisted execution plan and routed every node
+    // through the harness registry. The migrated handoff edge is `selected`:
+    // the planner selects it after the brief, and the review-accept does NOT
+    // refire the implementer — the legacy early-accept behavior is preserved.
+    const plan = database.getExecutionPlan(run.id)!;
+    expect(plan.status).toBe("succeeded");
+    expect(plan.graphId).toBe("graph");
+    expect(adapter.calls.map((call) => call.nodeId)).toEqual([
+      "planner",
+      "implementer",
+      "planner",
+    ]);
+    const executions = database.listNodeExecutions(run.id);
+    expect(executions.map((node) => node.visits)).toEqual([1, 2]);
+    expect(saved.iteration).toBe(1);
     database.close();
   });
 
-  it("stops at the iteration cap", async () => {
+  it("loops through a needs_changes review before accepting", async () => {
+    const database = new SpireDatabase(":memory:");
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("first build"),
+      rejected(),
+      ok("second build"),
+      ok("accepted"),
+    ]);
+    const { engine } = setup(adapter, database);
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+    });
+
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    // The rejected review fires the revise (failure) edge, re-running the
+    // implementer; the later accept ends the run.
+    expect(adapter.calls.map((call) => call.nodeId)).toEqual([
+      "planner",
+      "implementer",
+      "planner",
+      "implementer",
+      "planner",
+    ]);
+    const saved = database.getRun(run.id)!;
+    expect(saved.iteration).toBe(2);
+    database.close();
+  });
+
+  it("stops looping at the maxVisits bound when review never accepts", async () => {
+    const database = new SpireDatabase(":memory:");
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("build 1"),
+      rejected(),
+      ok("build 2"),
+      rejected(),
+      ok("build 3"),
+    ]);
+    const { engine } = setup(adapter, database);
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+    });
+
+    await vi.waitFor(
+      () =>
+        expect(database.getRun(run.id)?.status).toBe("needs_attention"),
+      { timeout: 3000 },
+    );
+    // Three planner visits and three implementer visits, then the bound
+    // holds: the final build-review route was ready to fire but suppressed
+    // by the planner's maxVisits — budget exhaustion, not success.
+    expect(adapter.calls).toHaveLength(6);
+    const executions = database.listNodeExecutions(run.id);
+    expect(executions.map((node) => node.visits)).toEqual([3, 3]);
+    expect(database.getExecutionPlan(run.id)?.status).toBe("needs_attention");
+    database.close();
+  });
+
+  it("stops with needs_attention at the step cap", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "spire-limit-"));
     const database = new SpireDatabase(path.join(directory, "test.sqlite"));
-    const harness = new FakeHarness([
-      brief,
-      implementation,
-      JSON.stringify({
-        decision: "needs_changes",
-        evidence: [],
-        feedback: ["try again"],
-      }),
-    ]);
-    const engine = new RunEngine(
-      database,
-      harness,
-      new FakeBackend(),
-      () => undefined,
-    );
+    const adapter = new FakeAdapter([select(["a"], "brief written"), ok("built")]);
+    const { engine } = setup(adapter, database);
     const run = await engine.start({
       graph: graph(1),
       repositoryPath: "/tmp/repository",
@@ -181,7 +292,153 @@ describe("RunEngine", () => {
       () => expect(database.getRun(run.id)?.status).toBe("needs_attention"),
       { timeout: 3000 },
     );
-    expect(database.getRun(run.id)?.iteration).toBe(1);
+    expect(adapter.calls).toHaveLength(2);
+    expect(database.getExecutionPlan(run.id)?.status).toBe("needs_attention");
+    database.close();
+  });
+
+  it("retries a capped run to completion", async () => {
+    const database = new SpireDatabase(":memory:");
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("built"),
+      ok("accepted"),
+    ]);
+    const { engine } = setup(adapter, database);
+    const run = await engine.start({
+      graph: graph(1),
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+    });
+    // maxIterations 1 compiles to maxSteps 2: the review step exceeds the
+    // initial budget.
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("needs_attention"),
+      { timeout: 3000 },
+    );
+
+    await engine.retry(run.id);
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    // brief, build, then the review after the retry.
+    expect(adapter.calls.map((call) => call.nodeId)).toEqual([
+      "planner",
+      "implementer",
+      "planner",
+    ]);
+    database.close();
+  });
+
+  it("stops an active run and aborts the in-flight node attempt", async () => {
+    const database = new SpireDatabase(":memory:");
+    const adapter = new FakeAdapter([], true);
+    const { engine } = setup(adapter, database);
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+    });
+    await vi.waitFor(() => expect(adapter.calls.length).toBeGreaterThan(0), {
+      timeout: 3000,
+    });
+    await engine.stop(run.id);
+    const saved = database.getRun(run.id)!;
+    expect(saved.status).toBe("stopped");
+    expect(saved.finishedAt).toBeDefined();
+    expect(adapter.abortCalls.length).toBeGreaterThan(0);
+    database.close();
+  });
+
+  it("recovers an orphaned run on restart instead of failing it", async () => {
+    const database = new SpireDatabase(":memory:");
+    const startedAt = new Date().toISOString();
+    database.saveGraph(graph());
+    database.saveRun({
+      id: "run-1",
+      graphId: "graph",
+      graphVersion: 1,
+      repositoryPath: "/tmp/repository",
+      goal: "Add value",
+      status: "implementing",
+      iteration: 1,
+      startedAt,
+      events: [],
+      artifacts: {
+        diff: "",
+        changedFiles: [],
+        worktreePath: "/tmp/spire-fake",
+        branch: "spire/test",
+      },
+    });
+    database.saveExecutionPlan({
+      runId: "run-1",
+      graphId: "graph",
+      graphVersion: 1,
+      revision: 0,
+      status: "running",
+      stepCount: 3,
+      nodes: [
+        {
+          nodeId: "planner",
+          status: "running",
+          visits: 2,
+        },
+        {
+          nodeId: "implementer",
+          status: "succeeded",
+          visits: 1,
+          outcome: ok("built"),
+        },
+      ],
+      edges: [
+        {
+          id: "a",
+          source: "planner",
+          target: "implementer",
+          kind: "handoff",
+          when: "selected",
+          label: "brief",
+        },
+        {
+          id: "b",
+          source: "implementer",
+          target: "planner",
+          kind: "review",
+          when: "success",
+          label: "review",
+        },
+        {
+          id: "revise",
+          source: "planner",
+          target: "implementer",
+          kind: "handoff",
+          when: "failure",
+          label: "revise",
+        },
+      ],
+      patches: [],
+      updatedAt: startedAt,
+    });
+
+    const adapter = new FakeAdapter([ok("rebuilt"), ok("accepted")]);
+    const { engine } = setup(adapter, database);
+    expect(engine.activeId).toBe("run-1");
+    await vi.waitFor(
+      () => expect(database.getRun("run-1")?.status).toBe("succeeded"),
+      { timeout: 3000 },
+    );
+    // The orphaned review attempt was converted to a failure, not the whole
+    // run: the revise edge routed the build back through the implementer and
+    // the recovered review accepted.
+    const plan = database.getExecutionPlan("run-1")!;
+    const planner = plan.nodes.find((node) => node.nodeId === "planner")!;
+    expect(planner.visits).toBe(3);
+    expect(adapter.calls.map((call) => call.nodeId)).toEqual([
+      "implementer",
+      "planner",
+    ]);
     database.close();
   });
 });
@@ -190,22 +447,12 @@ describe("RunEngine trace journaling", () => {
   it("journals transitions, prompts, responses, and tool activity", async () => {
     const database = new SpireDatabase(":memory:");
     const journal = database.createTraceJournal();
-    const harness = new FakeHarness([
-      brief,
-      implementation,
-      JSON.stringify({
-        decision: "accepted",
-        evidence: ["value exists"],
-        feedback: [],
-      }),
+    const adapter = new FakeAdapter([
+      select(["a"], "brief written"),
+      ok("built"),
+      ok("accepted"),
     ]);
-    const engine = new RunEngine(
-      database,
-      harness,
-      new FakeBackend(),
-      () => undefined,
-      journal,
-    );
+    const { engine } = setup(adapter, database, journal);
     const run = await engine.start({
       graph: graph(),
       repositoryPath: "/tmp/repository",
@@ -223,24 +470,21 @@ describe("RunEngine trace journaling", () => {
     expect(kinds).toContain("run.transition");
     expect(kinds).toContain("run.prompt");
     expect(kinds).toContain("run.response");
-    expect(kinds).toContain("run.tool");
+    expect(kinds).toContain("run.tool_result");
 
     const plannerPrompt = events.find(
       (event) => event.kind === "run.prompt" && event.nodeId === "planner",
     );
     expect(plannerPrompt).toBeDefined();
     expect(plannerPrompt?.payload).toMatchObject({
-      prompt: expect.stringContaining("Add value"),
+      job: expect.stringContaining("Plan"),
     });
     const implementerResponse = events.find(
       (event) => event.kind === "run.response" && event.nodeId === "implementer",
     );
     expect(implementerResponse).toBeDefined();
-    expect(implementerResponse?.payload).toMatchObject({
-      text: expect.stringContaining("Added value"),
-    });
-    const toolEvent = events.find((event) => event.kind === "run.tool");
-    expect(toolEvent?.message).toBe("fake tool completed");
+    const toolEvent = events.find((event) => event.kind === "run.tool_result");
+    expect(toolEvent).toBeDefined();
     database.close();
   });
 
@@ -248,22 +492,8 @@ describe("RunEngine trace journaling", () => {
     const secret = "sk-abcdefghijklmnop";
     const database = new SpireDatabase(":memory:");
     const journal = database.createTraceJournal();
-    const harness = new FakeHarness([
-      brief,
-      implementation,
-      JSON.stringify({
-        decision: "accepted",
-        evidence: [`leaked ${secret}`],
-        feedback: [],
-      }),
-    ]);
-    const engine = new RunEngine(
-      database,
-      harness,
-      new FakeBackend(),
-      () => undefined,
-      journal,
-    );
+    const adapter = new FakeAdapter();
+    const { engine } = setup(adapter, database, journal);
     const run = await engine.start({
       graph: graph(),
       repositoryPath: "/tmp/repository",
@@ -289,22 +519,8 @@ describe("RunEngine trace journaling", () => {
       },
     } as unknown as TraceJournal;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const harness = new FakeHarness([
-      brief,
-      implementation,
-      JSON.stringify({
-        decision: "accepted",
-        evidence: [],
-        feedback: [],
-      }),
-    ]);
-    const engine = new RunEngine(
-      database,
-      harness,
-      new FakeBackend(),
-      () => undefined,
-      broken,
-    );
+    const adapter = new FakeAdapter();
+    const { engine } = setup(adapter, database, broken);
     const run = await engine.start({
       graph: graph(),
       repositoryPath: "/tmp/repository",
@@ -316,6 +532,94 @@ describe("RunEngine trace journaling", () => {
     );
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+    database.close();
+  });
+
+  it("wires collaboration inboxes and node worktree isolation into real runs", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spire-engine-git-"));
+    const repository = path.join(root, "repository");
+    await mkdir(repository);
+    await exec("git", ["init", "-b", "main"], { cwd: repository });
+    await exec("git", ["config", "user.email", "spire@example.test"], {
+      cwd: repository,
+    });
+    await exec("git", ["config", "user.name", "Spire Test"], { cwd: repository });
+    await writeFile(path.join(repository, "README.md"), "# Fixture\n");
+    await exec("git", ["add", "."], { cwd: repository });
+    await exec("git", ["commit", "-m", "fixture"], { cwd: repository });
+    const userDataDir = path.join(root, "user-data");
+
+    const database = new SpireDatabase(":memory:");
+    const adapter = new FakeAdapter(
+      [
+        {
+          ...select(["a"], "brief written"),
+          messages: [
+            {
+              recipient: { kind: "successors" },
+              kind: "handoff",
+              subject: "Brief ready",
+              body: "Implement the brief.",
+              artifactPaths: [],
+            },
+          ],
+        },
+        ok("built"),
+        ok("accepted"),
+      ],
+      false,
+      async (input) => {
+        if (input.nodeId !== "implementer") return;
+        await mkdir(path.join(input.directory, "src"), { recursive: true });
+        await writeFile(
+          path.join(input.directory, "src", "value.ts"),
+          "export const value = 1;\n",
+        );
+      },
+    );
+    const engine = new RunEngine(
+      database,
+      createHarnessRegistry([adapter]),
+      new LocalWorktreeBackend(path.join(userDataDir, "worktrees")),
+      () => undefined,
+      undefined,
+      userDataDir,
+    );
+    const run = await engine.start({
+      graph: graph(),
+      repositoryPath: repository,
+      goal: "Add value",
+    });
+    await vi.waitFor(
+      () => expect(database.getRun(run.id)?.status).toBe("succeeded"),
+      { timeout: 5000 },
+    );
+
+    const saved = database.getRun(run.id)!;
+    // Node workspace isolation: the workspace-write implementer ran in a
+    // private node worktree (not the integration worktree), and its
+    // committed work merged into the integration branch at the final sweep.
+    const implementerCall = adapter.calls.find(
+      (call) => call.nodeId === "implementer",
+    )!;
+    expect(implementerCall.directory).toContain("node-worktrees");
+    expect(implementerCall.directory).not.toBe(saved.artifacts!.worktreePath);
+    expect(saved.artifacts!.changedFiles).toEqual(["src/value.ts"]);
+    // Collaboration: agent contexts are assembled Markdown packets, and the
+    // planner's handoff landed in the implementer's userData inbox.
+    expect(adapter.calls[0].context).toContain("# Context for");
+    const inbox = await readFile(
+      path.join(
+        userDataDir,
+        "runs",
+        run.id,
+        "collaboration",
+        "inbox",
+        "implementer.md",
+      ),
+      "utf8",
+    );
+    expect(inbox).toContain("Brief ready");
     database.close();
   });
 });

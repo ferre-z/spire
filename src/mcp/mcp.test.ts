@@ -63,6 +63,15 @@ const EXPECTED_TOOL_NAMES = [
   "spire_harnesses_models",
   "spire_traces_query",
   "spire_traces_tail",
+  "spire_graphs_validate",
+  "spire_runs_plan_get",
+  "spire_runs_nodes_list",
+  "spire_runs_messages_list",
+  "spire_runs_messages_send",
+  "spire_runs_plan_patch",
+  "spire_runs_plan_rollback",
+  "spire_runs_checkpoint_resume",
+  "spire_runs_plan_promote",
 ] as const;
 
 const ARRAY_OUTPUT_TOOLS = [
@@ -232,12 +241,21 @@ describe("tool registry", () => {
       "harnesses.models": "spire_harnesses_models",
       "traces.query": "spire_traces_query",
       "traces.tail": "spire_traces_tail",
+      "graphs.validate": "spire_graphs_validate",
+      "runs.plan.get": "spire_runs_plan_get",
+      "runs.nodes.list": "spire_runs_nodes_list",
+      "runs.messages.list": "spire_runs_messages_list",
+      "runs.messages.send": "spire_runs_messages_send",
+      "runs.plan.patch": "spire_runs_plan_patch",
+      "runs.plan.rollback": "spire_runs_plan_rollback",
+      "runs.checkpoint.resume": "spire_runs_checkpoint_resume",
+      "runs.plan.promote": "spire_runs_plan_promote",
     });
   });
 
   it("covers every control capability exactly once", () => {
     expect(MCP_TOOLS).toHaveLength(CONTROL_OPERATION_NAMES.length);
-    expect(CONTROL_OPERATION_NAMES.length).toBe(20);
+    expect(CONTROL_OPERATION_NAMES.length).toBe(29);
     const mapped = new Set(MCP_TOOLS.map((tool) => tool.operation));
     for (const operation of CONTROL_OPERATION_NAMES) {
       expect(mapped.has(operation), `unmapped capability: ${operation}`).toBe(
@@ -319,17 +337,92 @@ describe("tool registry", () => {
         nextCursor: "cursor-2",
       }),
     ).toBe("1 graph: Demo (more available).");
+    expect(
+      summarizeToolResult("graphs.validate", { valid: true, issues: [] }),
+    ).toBe("Graph definition is valid.");
+    expect(
+      summarizeToolResult("runs.plan.get", {
+        runId: "run-1",
+        revision: 3,
+        status: "succeeded",
+        nodes: [],
+        patches: [],
+      }),
+    ).toBe("Plan revision 3, status succeeded, 0 nodes, 0 patches.");
+    expect(
+      summarizeToolResult("runs.nodes.list", { nodes: [], nextCursor: null }),
+    ).toBe("0 nodes.");
+    expect(
+      summarizeToolResult("runs.messages.list", {
+        messages: [],
+        nextCursor: null,
+      }),
+    ).toBe("0 messages.");
+    expect(
+      summarizeToolResult("runs.messages.send", {
+        sent: true,
+        messageId: "m1",
+        sequence: 2,
+      }),
+    ).toBe("Message m1 (seq 2) sent to run.");
+    expect(
+      summarizeToolResult("runs.plan.patch", {
+        id: "p1",
+        baseRevision: 0,
+        reason: "test",
+        operations: [],
+        appliedRevision: 1,
+        actorNodeId: "planner",
+        appliedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe("Patch p1 applied at revision 1.");
+    expect(
+      summarizeToolResult("runs.plan.rollback", {
+        id: "rb1",
+        baseRevision: 1,
+        reason: "rollback",
+        operations: [],
+        appliedRevision: 2,
+        actorNodeId: "planner",
+        appliedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe("Patch rb1 rolled back at revision 2.");
+    expect(
+      summarizeToolResult("runs.checkpoint.resume", {
+        runId: "run-1",
+        revision: 1,
+        status: "running",
+        nodes: [],
+        patches: [],
+      }),
+    ).toBe("Resumed run at plan revision 1, status running.");
+    expect(
+      summarizeToolResult("runs.plan.promote", {
+        id: "graph",
+        name: "Promoted",
+        version: 2,
+        nodes: [],
+        edges: [],
+        groups: [],
+        maxSteps: 100,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe('Promoted plan to graph "Promoted" v2.');
   });
 });
 
 describe("resource registry", () => {
-  it("exposes the state resource and the four resource templates", () => {
+  it("exposes the state resource and the eight resource templates", () => {
     expect(SPIRE_STATE_RESOURCE_URI).toBe("spire://state");
     expect(SPIRE_RESOURCE_TEMPLATES.map((template) => template.uriTemplate)).toEqual([
       "spire://graphs/{graphId}",
       "spire://runs/{runId}",
       "spire://runs/{runId}/artifacts",
       "spire://traces/{runId}",
+      "spire://runs/{runId}/plan",
+      "spire://runs/{runId}/nodes/{nodeId}",
+      "spire://runs/{runId}/messages",
+      "spire://runs/{runId}/patches",
     ]);
   });
 
@@ -502,7 +595,7 @@ describe("MCP server", () => {
     await mcpClient.close();
   });
 
-  it("lists exactly the 20 tools with annotations and object schemas", async () => {
+  it("lists exactly the 29 tools with annotations and object schemas", async () => {
     const { tools } = await mcpClient.listTools();
     expect(tools.map((tool) => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
     for (const tool of tools) {
@@ -623,6 +716,10 @@ describe("MCP server", () => {
       "spire://runs/{runId}",
       "spire://runs/{runId}/artifacts",
       "spire://traces/{runId}",
+      "spire://runs/{runId}/plan",
+      "spire://runs/{runId}/nodes/{nodeId}",
+      "spire://runs/{runId}/messages",
+      "spire://runs/{runId}/patches",
     ]);
   });
 

@@ -36,6 +36,15 @@ const EXPECTED_OPERATIONS = [
   "harnesses.models",
   "traces.query",
   "traces.tail",
+  "graphs.validate",
+  "runs.plan.get",
+  "runs.nodes.list",
+  "runs.messages.list",
+  "runs.messages.send",
+  "runs.plan.patch",
+  "runs.plan.rollback",
+  "runs.checkpoint.resume",
+  "runs.plan.promote",
 ] as const;
 
 const validTraceEvent = {

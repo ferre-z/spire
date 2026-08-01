@@ -8,15 +8,27 @@ import {
   type Diagnostics,
   type GraphPage,
   type GraphRef,
+  type GraphValidation,
+  type GraphValidateInput,
   type HarnessStatus,
+  type MessagePage,
+  type NodeExecutionPage,
   type PageInput,
+  type PlanPatchInput,
+  type PlanPromoteInput,
+  type PlanRollbackInput,
   type RepositoryValidation,
   type RunPage,
   type RunQuery,
+  type RunScopedPageInput,
+  type SendMessageInput,
+  type SentMessage,
 } from "../../shared/control";
 import type {
   AppSnapshot,
   GraphDefinition,
+  GraphDefinitionV2,
+  HarnessId,
   ModelOption,
   OpenCodeStatus,
   ProviderInput,
@@ -25,6 +37,12 @@ import type {
   StartRunInput,
   UpdateGraphInput,
 } from "../../shared/domain";
+import { graphDefinitionV2Schema } from "../../shared/domain";
+import type {
+  AppliedPlanPatch,
+  ExecutionPlan,
+} from "../../shared/execution";
+import type { HarnessRegistry } from "../../shared/harness";
 import type { TraceCursor, TraceFilter, TraceListener, TracePage } from "../../shared/trace";
 import type { JsonValue, WorkspaceLayoutRecord } from "../../shared/workspace";
 import { validateWorkspaceLayoutRecord } from "../../shared/workspace";
@@ -57,12 +75,20 @@ export type SpireControlDeps = {
   database: SpireDatabase;
   engine: RunEngine;
   harness: AgentHarness;
+  registry: HarnessRegistry;
   backend: ExecutionBackend;
   journal: TraceJournal;
   environment?: SpireControlEnvironment;
 };
 
 const TRACE_SUBSYSTEM = "control";
+
+/** Display names for the harnesses the registry can report. */
+const HARNESS_NAMES: Record<HarnessId, string> = {
+  opencode: "OpenCode",
+  codex: "Codex",
+  "claude-code": "Claude Code",
+};
 
 function defaultEnvironment(): SpireControlEnvironment {
   return {
@@ -463,18 +489,28 @@ export class SpireControl {
   }
 
   async handleHarnessesList(): Promise<HarnessStatus[]> {
-    this.openCodeStatus = await this.deps.harness.detect();
-    return [{ id: "opencode", name: "OpenCode", status: this.openCodeStatus }];
+    const statuses = await this.deps.registry.probeAll();
+    const openCode = statuses.find((status) => status.harnessId === "opencode");
+    if (openCode) {
+      const { harnessId, ...status } = openCode;
+      void harnessId;
+      this.openCodeStatus = status;
+    }
+    return statuses.map((status) => ({
+      id: status.harnessId,
+      name: HARNESS_NAMES[status.harnessId],
+      status,
+    }));
   }
 
   async handleHarnessesModels(input: {
-    harnessId: string;
+    harnessId: HarnessId;
   }): Promise<ModelOption[]> {
-    if (input.harnessId !== "opencode") {
-      throw new Error(`Unknown harness: ${input.harnessId}.`);
+    const models = await this.deps.registry.get(input.harnessId).listModels();
+    if (input.harnessId === "opencode") {
+      this.modelsCache = models;
     }
-    this.modelsCache = await this.deps.harness.models();
-    return this.modelsCache;
+    return models;
   }
 
   handleTracesQuery(input: TraceFilter): TracePage {
@@ -483,6 +519,80 @@ export class SpireControl {
 
   handleTracesTail(input: TraceCursor): TracePage {
     return this.deps.journal.query({ cursor: input });
+  }
+
+  // --- New operation handlers -----------------------------------------------
+
+  handleGraphsValidate(input: GraphValidateInput): GraphValidation {
+    const result = graphDefinitionV2Schema.safeParse(input.graph);
+    if (result.success) {
+      return { valid: true, issues: [] };
+    }
+    return {
+      valid: false,
+      issues: result.error.issues.map((issue) => issue.message),
+    };
+  }
+
+  handleRunsPlanGet(input: { runId: string }): ExecutionPlan {
+    return this.deps.engine.getExecutionPlan(input.runId);
+  }
+
+  handleRunsNodesList(input: RunScopedPageInput): NodeExecutionPage {
+    this.requireRun(input.runId);
+    const nodes = this.deps.database.listNodeExecutions(input.runId);
+    const result = page(nodes, parseCursor(input.cursor), input.limit);
+    return { nodes: result.items, nextCursor: result.nextCursor };
+  }
+
+  handleRunsMessagesList(input: RunScopedPageInput): MessagePage {
+    this.requireRun(input.runId);
+    const messages = this.deps.database.listCollaborationMessages(input.runId);
+    const result = page(messages, parseCursor(input.cursor), input.limit);
+    return { messages: result.items, nextCursor: result.nextCursor };
+  }
+
+  async handleRunsMessagesSend(
+    input: SendMessageInput,
+  ): Promise<SentMessage> {
+    const message = await this.deps.engine.deliverMessage(
+      input.runId,
+      {
+        recipient: input.recipient,
+        kind: input.kind,
+        subject: input.subject,
+        body: input.body,
+        artifactPaths: input.artifactPaths,
+      },
+      input.senderNodeId,
+    );
+    return {
+      sent: true,
+      messageId: message.id,
+      sequence: message.sequence,
+    };
+  }
+
+  handleRunsPlanPatch(input: PlanPatchInput): AppliedPlanPatch {
+    return this.deps.engine.applyPlanPatch(
+      input.runId,
+      input.actorNodeId,
+      input.draft,
+    );
+  }
+
+  handleRunsPlanRollback(input: PlanRollbackInput): AppliedPlanPatch {
+    return this.deps.engine.rollbackPlanPatch(input.runId, input.patchId);
+  }
+
+  async handleRunsCheckpointResume(input: {
+    runId: string;
+  }): Promise<ExecutionPlan> {
+    return this.deps.engine.resumeCheckpoint(input.runId);
+  }
+
+  handleRunsPlanPromote(input: PlanPromoteInput): GraphDefinitionV2 {
+    return this.deps.engine.promotePlan(input.runId, input.name);
   }
 
   // --- Internals -----------------------------------------------------------

@@ -1,5 +1,6 @@
 import { ShieldCheck } from "lucide-react";
-import { useAppStore } from "../store";
+import { isGraphV2, useAppStore } from "../store";
+import type { LegacyAgentNode } from "../../shared/domain";
 
 const GRAPH_POLICY = [
   { label: "Runs execute in isolated Git worktrees", allowed: true },
@@ -11,7 +12,10 @@ const GRAPH_POLICY = [
 export function RuntimePolicyPane() {
   const graph = useAppStore((state) => state.graph)!;
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
-  const node = graph.nodes.find((item) => item.id === selectedNodeId);
+  const isV2 = isGraphV2(graph);
+  const node: LegacyAgentNode | undefined = isV2
+    ? undefined
+    : graph.nodes.find((item) => item.id === selectedNodeId);
 
   return (
     <div className="pane pane-scroll pane-form" data-pane="runtime-policy">

@@ -2,10 +2,14 @@ import { z } from "zod";
 import {
   artifactSchema,
   graphDefinitionSchema,
+  graphDefinitionV2Schema,
+  harnessIdSchema,
   runRecordSchema,
   runStatusSchema,
   type AppSnapshot,
   type GraphDefinition,
+  type GraphDefinitionV2,
+  type HarnessId,
   type ModelOption,
   type OpenCodeStatus,
   type RunArtifacts,
@@ -13,6 +17,19 @@ import {
   type StartRunInput,
   type UpdateGraphInput,
 } from "./domain";
+import {
+  appliedPlanPatchSchema,
+  collaborationMessageDraftSchema,
+  executionPlanSchema,
+  nodeExecutionSchema,
+  planPatchDraftSchema,
+  type AppliedPlanPatch,
+  type ExecutionPlan,
+} from "./execution";
+import {
+  collaborationMessageSchema,
+} from "./collaboration";
+import { harnessProbeStatusSchema } from "./harness";
 import {
   workspaceLayoutRecordSchema,
   type WorkspaceLayoutRecord,
@@ -63,7 +80,7 @@ export const appSnapshotSchema = z.strictObject({
 }) satisfies z.ZodType<AppSnapshot>;
 
 export const startRunInputSchema = z.strictObject({
-  graph: graphDefinitionSchema,
+  graph: z.union([graphDefinitionSchema, graphDefinitionV2Schema]),
   repositoryPath: z.string().min(1),
   goal: z.string().min(1),
 }) satisfies z.ZodType<StartRunInput>;
@@ -136,14 +153,92 @@ export const graphIdInputSchema = z.strictObject({
 });
 
 export const harnessIdInputSchema = z.strictObject({
-  harnessId: z.string().min(1),
+  harnessId: harnessIdSchema,
 });
 
-/** Status of the single OpenCode harness Spire drives today. */
+// --- New operation schemas --------------------------------------------------
+
+/**
+ * Input for graphs.validate: any graph-like object. The handler validates it
+ * against the v2 schema and returns issues, so invalid graphs are reported
+ * rather than rejected at input parsing time.
+ */
+export const graphValidateInputSchema = z.strictObject({
+  graph: z.record(z.string(), z.unknown()),
+});
+export type GraphValidateInput = z.infer<typeof graphValidateInputSchema>;
+
+/** Output for graphs.validate: whether the graph is valid and why not. */
+export const graphValidationSchema = z.strictObject({
+  valid: z.boolean(),
+  issues: z.array(z.string()),
+});
+export type GraphValidation = z.infer<typeof graphValidationSchema>;
+
+/** Input for runs.nodes.list and runs.messages.list: run-scoped pagination. */
+export const runScopedPageInputSchema = z.strictObject({
+  runId: z.string().min(1),
+  limit: z.number().int().min(1).max(CONTROL_PAGE_MAX_LIMIT).optional(),
+  cursor: z.string().min(1).optional(),
+});
+export type RunScopedPageInput = z.infer<typeof runScopedPageInputSchema>;
+
+export const nodeExecutionPageSchema = z.strictObject({
+  nodes: z.array(nodeExecutionSchema),
+  nextCursor: z.string().min(1).nullable(),
+});
+export type NodeExecutionPage = z.infer<typeof nodeExecutionPageSchema>;
+
+export const messagePageSchema = z.strictObject({
+  messages: z.array(collaborationMessageSchema),
+  nextCursor: z.string().min(1).nullable(),
+});
+export type MessagePage = z.infer<typeof messagePageSchema>;
+
+/** Input for runs.messages.send: a run-scoped collaboration message draft. */
+export const sendMessageInputSchema = collaborationMessageDraftSchema.extend({
+  runId: z.string().min(1),
+  senderNodeId: z.string().min(1),
+});
+export type SendMessageInput = z.infer<typeof sendMessageInputSchema>;
+
+export const sentMessageSchema = z.strictObject({
+  sent: z.literal(true),
+  messageId: z.string().min(1),
+  sequence: z.number().int().nonnegative(),
+});
+export type SentMessage = z.infer<typeof sentMessageSchema>;
+
+/** Input for runs.plan.patch: apply an authorized patch draft to a run's plan. */
+export const planPatchInputSchema = z.strictObject({
+  runId: z.string().min(1),
+  actorNodeId: z.string().min(1),
+  draft: planPatchDraftSchema,
+});
+export type PlanPatchInput = z.infer<typeof planPatchInputSchema>;
+
+/** Input for runs.plan.rollback: roll back an applied patch. */
+export const planRollbackInputSchema = z.strictObject({
+  runId: z.string().min(1),
+  patchId: z.string().min(1),
+});
+export type PlanRollbackInput = z.infer<typeof planRollbackInputSchema>;
+
+/** Input for runs.plan.promote: save the live plan topology as a graph version. */
+export const planPromoteInputSchema = z.strictObject({
+  runId: z.string().min(1),
+  name: z.string().min(1).max(120).optional(),
+});
+export type PlanPromoteInput = z.infer<typeof planPromoteInputSchema>;
+
+/**
+ * Status of one harness in the multi-harness registry. The canonical status
+ * shape is `HarnessProbeStatus` from shared/harness.ts — do not re-declare it.
+ */
 export const harnessStatusSchema = z.strictObject({
-  id: z.literal("opencode"),
+  id: harnessIdSchema,
   name: z.string().min(1),
-  status: openCodeStatusSchema,
+  status: harnessProbeStatusSchema,
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
 
@@ -182,9 +277,18 @@ export type ControlOperationMap = {
   "layouts.save": { input: WorkspaceLayoutRecord; output: { saved: true } };
   "layouts.reset": { input: { graphId: string }; output: { reset: true } };
   "harnesses.list": { input: Record<string, never>; output: HarnessStatus[] };
-  "harnesses.models": { input: { harnessId: string }; output: ModelOption[] };
+  "harnesses.models": { input: { harnessId: HarnessId }; output: ModelOption[] };
   "traces.query": { input: TraceFilter; output: TracePage };
   "traces.tail": { input: TraceCursor; output: TracePage };
+  "graphs.validate": { input: GraphValidateInput; output: GraphValidation };
+  "runs.plan.get": { input: { runId: string }; output: ExecutionPlan };
+  "runs.nodes.list": { input: RunScopedPageInput; output: NodeExecutionPage };
+  "runs.messages.list": { input: RunScopedPageInput; output: MessagePage };
+  "runs.messages.send": { input: SendMessageInput; output: SentMessage };
+  "runs.plan.patch": { input: PlanPatchInput; output: AppliedPlanPatch };
+  "runs.plan.rollback": { input: PlanRollbackInput; output: AppliedPlanPatch };
+  "runs.checkpoint.resume": { input: { runId: string }; output: ExecutionPlan };
+  "runs.plan.promote": { input: PlanPromoteInput; output: GraphDefinitionV2 };
 };
 
 export type ControlOperationName = keyof ControlOperationMap;
@@ -320,6 +424,61 @@ export const CONTROL_CAPABILITIES: ControlCapabilities = {
     ...READ,
     inputSchema: traceCursorSchema,
     outputSchema: tracePageSchema,
+  },
+  "graphs.validate": {
+    ...READ,
+    inputSchema: graphValidateInputSchema,
+    outputSchema: graphValidationSchema,
+  },
+  "runs.plan.get": {
+    ...READ,
+    inputSchema: runIdInputSchema,
+    outputSchema: executionPlanSchema,
+  },
+  "runs.nodes.list": {
+    ...READ,
+    inputSchema: runScopedPageInputSchema,
+    outputSchema: nodeExecutionPageSchema,
+  },
+  "runs.messages.list": {
+    ...READ,
+    inputSchema: runScopedPageInputSchema,
+    outputSchema: messagePageSchema,
+  },
+  "runs.messages.send": {
+    readOnly: false,
+    destructive: false,
+    idempotent: false,
+    inputSchema: sendMessageInputSchema,
+    outputSchema: sentMessageSchema,
+  },
+  "runs.plan.patch": {
+    readOnly: false,
+    destructive: false,
+    idempotent: false,
+    inputSchema: planPatchInputSchema,
+    outputSchema: appliedPlanPatchSchema,
+  },
+  "runs.plan.rollback": {
+    readOnly: false,
+    destructive: true,
+    idempotent: false,
+    inputSchema: planRollbackInputSchema,
+    outputSchema: appliedPlanPatchSchema,
+  },
+  "runs.checkpoint.resume": {
+    readOnly: false,
+    destructive: false,
+    idempotent: false,
+    inputSchema: runIdInputSchema,
+    outputSchema: executionPlanSchema,
+  },
+  "runs.plan.promote": {
+    readOnly: false,
+    destructive: false,
+    idempotent: false,
+    inputSchema: planPromoteInputSchema,
+    outputSchema: graphDefinitionV2Schema,
   },
 };
 

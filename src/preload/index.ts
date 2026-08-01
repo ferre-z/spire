@@ -2,10 +2,19 @@ import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type SpireApi } from "../shared/api";
 import type {
   GraphDefinition,
+  GraphDefinitionV2,
+  HarnessId,
   ProviderInput,
   RunEvent,
   StartRunInput,
 } from "../shared/domain";
+import type {
+  PlanPatchInput,
+  PlanPromoteInput,
+  PlanRollbackInput,
+  RunScopedPageInput,
+  SendMessageInput,
+} from "../shared/control";
 import type { TraceEvent, TraceFilter } from "../shared/trace";
 import type { WorkspaceLayoutRecord } from "../shared/workspace";
 
@@ -15,7 +24,7 @@ const api: SpireApi = {
   connectOpenRouter: (input: ProviderInput) =>
     ipcRenderer.invoke(IPC.connectOpenRouter, input),
   chooseRepository: () => ipcRenderer.invoke(IPC.chooseRepository),
-  saveGraph: (graph: GraphDefinition) =>
+  saveGraph: (graph: GraphDefinition | GraphDefinitionV2) =>
     ipcRenderer.invoke(IPC.saveGraph, graph),
   startRun: (input: StartRunInput) =>
     ipcRenderer.invoke(IPC.startRun, input),
@@ -48,6 +57,27 @@ const api: SpireApi = {
     ipcRenderer.on(IPC.traceEvent, handler);
     return () => ipcRenderer.removeListener(IPC.traceEvent, handler);
   },
+  graphsValidate: (graph: Record<string, unknown>) =>
+    ipcRenderer.invoke(IPC.graphsValidate, graph),
+  harnessesList: () => ipcRenderer.invoke(IPC.harnessesList),
+  harnessesModels: (harnessId: HarnessId) =>
+    ipcRenderer.invoke(IPC.harnessesModels, harnessId),
+  runsPlanGet: (runId: string) =>
+    ipcRenderer.invoke(IPC.runsPlanGet, runId),
+  runsNodesList: (input: RunScopedPageInput) =>
+    ipcRenderer.invoke(IPC.runsNodesList, input),
+  runsMessagesList: (input: RunScopedPageInput) =>
+    ipcRenderer.invoke(IPC.runsMessagesList, input),
+  runsMessagesSend: (input: SendMessageInput) =>
+    ipcRenderer.invoke(IPC.runsMessagesSend, input),
+  runsPlanPatch: (input: PlanPatchInput) =>
+    ipcRenderer.invoke(IPC.runsPlanPatch, input),
+  runsPlanRollback: (input: PlanRollbackInput) =>
+    ipcRenderer.invoke(IPC.runsPlanRollback, input),
+  runsCheckpointResume: (runId: string) =>
+    ipcRenderer.invoke(IPC.runsCheckpointResume, runId),
+  runsPlanPromote: (input: PlanPromoteInput) =>
+    ipcRenderer.invoke(IPC.runsPlanPromote, input),
 };
 
 contextBridge.exposeInMainWorld("spire", api);

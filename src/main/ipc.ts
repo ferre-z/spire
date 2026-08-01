@@ -4,10 +4,19 @@ import type { BrowserWindow } from "electron";
 import { IPC } from "../shared/api";
 import type {
   GraphDefinition,
+  GraphDefinitionV2,
+  HarnessId,
   ProviderInput,
   RunEvent,
   StartRunInput,
 } from "../shared/domain";
+import type {
+  PlanPatchInput,
+  PlanPromoteInput,
+  PlanRollbackInput,
+  RunScopedPageInput,
+  SendMessageInput,
+} from "../shared/control";
 import type { WorkspaceEnvironment } from "../shared/workspace";
 import type { TraceFilter } from "../shared/trace";
 import type { SpireControl } from "./control/spire-control";
@@ -66,10 +75,13 @@ export function registerIpc(
     });
     return validation.ok ? validation.path : null;
   });
-  ipcMain.handle(IPC.saveGraph, async (_event, graph: GraphDefinition) => {
-    await control.execute("graphs.save", { graph });
-    return control.snapshot();
-  });
+  ipcMain.handle(
+    IPC.saveGraph,
+    async (_event, graph: GraphDefinition | GraphDefinitionV2) => {
+      await control.execute("graphs.save", { graph });
+      return control.snapshot();
+    },
+  );
   ipcMain.handle(IPC.startRun, async (_event, input: StartRunInput) => {
     await control.execute("runs.start", input);
     return control.snapshot();
@@ -131,6 +143,41 @@ export function registerIpc(
   ipcMain.handle(IPC.environment, () => detectEnvironment());
   ipcMain.handle(IPC.queryTraces, (_event, filter: TraceFilter) =>
     control.execute("traces.query", filter),
+  );
+  ipcMain.handle(IPC.graphsValidate, (_event, graph: Record<string, unknown>) =>
+    control.execute("graphs.validate", { graph }),
+  );
+  ipcMain.handle(IPC.harnessesList, () =>
+    control.execute("harnesses.list"),
+  );
+  ipcMain.handle(IPC.harnessesModels, (_event, harnessId: unknown) =>
+    control.execute("harnesses.models", {
+      harnessId: harnessId as HarnessId,
+    }),
+  );
+  ipcMain.handle(IPC.runsPlanGet, (_event, runId: string) =>
+    control.execute("runs.plan.get", { runId }),
+  );
+  ipcMain.handle(IPC.runsNodesList, (_event, input: RunScopedPageInput) =>
+    control.execute("runs.nodes.list", input),
+  );
+  ipcMain.handle(IPC.runsMessagesList, (_event, input: RunScopedPageInput) =>
+    control.execute("runs.messages.list", input),
+  );
+  ipcMain.handle(IPC.runsMessagesSend, (_event, input: SendMessageInput) =>
+    control.execute("runs.messages.send", input),
+  );
+  ipcMain.handle(IPC.runsPlanPatch, (_event, input: PlanPatchInput) =>
+    control.execute("runs.plan.patch", input),
+  );
+  ipcMain.handle(IPC.runsPlanRollback, (_event, input: PlanRollbackInput) =>
+    control.execute("runs.plan.rollback", input),
+  );
+  ipcMain.handle(IPC.runsCheckpointResume, (_event, runId: string) =>
+    control.execute("runs.checkpoint.resume", { runId }),
+  );
+  ipcMain.handle(IPC.runsPlanPromote, (_event, input: PlanPromoteInput) =>
+    control.execute("runs.plan.promote", input),
   );
 
   // Forward trace notifications to the renderer through one dedicated,
