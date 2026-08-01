@@ -10,7 +10,8 @@ import { createDefaultHarnessRegistry } from "./harness/registry";
 import { RunEngine } from "./run-engine";
 import { isAllowedPopoutUrl } from "./window-policy";
 import { LocalWorktreeBackend } from "./worktree";
-import type { GraphDefinition, RunRecord } from "../shared/domain";
+import type { GraphDefinition, GraphDefinitionV2, HarnessId, RunRecord } from "../shared/domain";
+import type { HarnessRegistry } from "../shared/harness";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -21,13 +22,30 @@ let harness: OpenCodeHarness | undefined;
 let controlSocket: ControlSocketServer | undefined;
 let shutdownStarted = false;
 
+/**
+ * Shape of the JSON seed fixture applied at boot via SPIRE_SEED.
+ *
+ * `graphsV2` seeds graph-native v2 definitions (saved via saveGraphV2);
+ * `harnessFixtures` seeds predetermined harness outputs so E2E suites can
+ * exercise the full scheduler without installed CLI dependencies.
+ */
 type SeedFixture = {
   settings?: Record<string, string>;
   graphs?: GraphDefinition[];
+  graphsV2?: GraphDefinitionV2[];
   runs?: RunRecord[];
+  harnessFixtures?: Record<string, FixtureHarnessConfig>;
 };
 
-function seedFromFixture(database: SpireDatabase, fixturePath: string): void {
+/** JSON-compatible view of the fixture harness config (read from seed JSON). */
+type FixtureHarnessConfig = {
+  nodes: Record<string, Array<{ output: unknown; events?: unknown; sideEffect?: unknown }>>;
+};
+
+function seedFromFixture(
+  database: SpireDatabase,
+  fixturePath: string,
+): SeedFixture | undefined {
   try {
     const fixture = JSON.parse(
       readFileSync(fixturePath, "utf8"),
@@ -36,9 +54,12 @@ function seedFromFixture(database: SpireDatabase, fixturePath: string): void {
       database.setSetting(key, value);
     }
     for (const graph of fixture.graphs ?? []) database.saveGraph(graph);
+    for (const graph of fixture.graphsV2 ?? []) database.saveGraphV2(graph);
     for (const run of fixture.runs ?? []) database.saveRun(run);
+    return fixture;
   } catch (error) {
     console.error("Failed to apply SPIRE_SEED fixture:", error);
+    return undefined;
   }
 }
 
@@ -109,7 +130,7 @@ function createWindow(): void {
   }
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   nativeTheme.themeSource = "dark";
   // SPIRE_USER_DATA lets E2E tests run against an isolated, pre-seeded
   // database instead of the real user profile.
@@ -117,11 +138,22 @@ void app.whenReady().then(() => {
   database = new SpireDatabase(path.join(dataRoot, "spire.sqlite"));
   // E2E-only fixture seeding: SPIRE_SEED points at a JSON file with
   // settings/graphs/runs so UI tests never touch OpenRouter.
+  let seed: SeedFixture | undefined;
   if (process.env.SPIRE_SEED) {
-    seedFromFixture(database, process.env.SPIRE_SEED);
+    seed = seedFromFixture(database, process.env.SPIRE_SEED);
   }
   harness = new OpenCodeHarness();
-  const registry = createDefaultHarnessRegistry(dataRoot);
+  let registry: HarnessRegistry;
+  if (seed?.harnessFixtures) {
+    // Fixture harnesses: deterministic, CLI-free run execution for E2E tests.
+    // Loaded dynamically so test-only code never ships in the production bundle.
+    const { createFixtureHarnessRegistry } = await import("./harness/fixture");
+    registry = createFixtureHarnessRegistry(
+      seed.harnessFixtures as Record<HarnessId, import("./harness/fixture").FixtureHarnessConfig>,
+    );
+  } else {
+    registry = createDefaultHarnessRegistry(dataRoot);
+  }
   const backend = new LocalWorktreeBackend(path.join(dataRoot, "worktrees"));
   const journal = database.createTraceJournal();
   const engine = new RunEngine(

@@ -1,18 +1,48 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { GraphDefinition, RunRecord } from "../src/shared/domain";
+import type {
+  GraphDefinition,
+  GraphDefinitionV2,
+  HarnessId,
+  RunRecord,
+} from "../src/shared/domain";
+import type { HarnessEvent } from "../src/shared/harness";
+
+/**
+ * Predetermined output for one node visit, optionally with fixture-emitted
+ * harness events and a side-effect function descriptor (serialized as JSON
+ * for the seed fixture).
+ */
+export type FixtureNodeConfig = {
+  output: unknown;
+  /** Optional harness events to emit via onEvent before the side effect runs. */
+  events?: HarnessEvent[];
+  /** Optional file-write side effect: { path: string; content: string }. */
+  sideEffect?: { writeFile?: { path: string; content: string } };
+};
+
+/** Per-harness fixture config: node-id → ordered list of visit outputs. */
+export type FixtureHarnessConfig = {
+  nodes: Record<string, FixtureNodeConfig[]>;
+};
 
 /**
  * Deterministic fixtures for Electron UI tests. The harness writes a JSON
  * fixture that the packaged app applies on boot (SPIRE_SEED), so seeding
  * runs through the app's own database code and no test ever contacts
  * OpenRouter — the workspace renders entirely from stored records.
+ *
+ * `graphsV2` seeds graph-native v2 definitions and `harnessFixtures`
+ * injects predetermined harness outputs so E2E suites can exercise the
+ * full scheduler without installed CLI dependencies.
  */
 
 export type SeedFixture = {
   settings?: Record<string, string>;
   graphs?: GraphDefinition[];
+  graphsV2?: GraphDefinitionV2[];
   runs?: RunRecord[];
+  harnessFixtures?: Record<HarnessId, FixtureHarnessConfig>;
 };
 
 export function seedGraph(
@@ -136,7 +166,9 @@ export type SeedOptions = {
   /** When false, the app boots into onboarding. Defaults to true. */
   onboardingComplete?: boolean;
   graphs?: GraphDefinition[];
+  graphsV2?: GraphDefinitionV2[];
   runs?: RunRecord[];
+  harnessFixtures?: Record<HarnessId, FixtureHarnessConfig>;
 };
 
 export function writeSeedFixture(dir: string, options: SeedOptions = {}): string {
@@ -146,8 +178,11 @@ export function writeSeedFixture(dir: string, options: SeedOptions = {}): string
       (options.onboardingComplete ?? true)
         ? { onboardingComplete: "true" }
         : {},
-    graphs: options.graphs ?? [seedGraph("graph-alpha", "Build & Review")],
+    graphs: options.graphs ??
+      (options.graphsV2 ? undefined : [seedGraph("graph-alpha", "Build & Review")]),
+    graphsV2: options.graphsV2,
     runs: options.runs ?? [],
+    harnessFixtures: options.harnessFixtures,
   };
   const fixturePath = path.join(dir, "spire-seed.json");
   writeFileSync(fixturePath, JSON.stringify(fixture, null, 2));

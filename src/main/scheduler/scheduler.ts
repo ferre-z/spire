@@ -169,6 +169,15 @@ export class GraphScheduler {
       ) {
         // A manual checkpoint the user chose to resume past.
         await this.passCheckpoint(plan, execution, node);
+        // passCheckpoint may have completed or failed the checkpoint; credit
+        // and consume edge tokens so successors can activate under resume.
+        if (
+          (execution.status as string) === "succeeded" ||
+          (execution.status as string) === "failed"
+        ) {
+          this.offerTokens(plan, execution);
+          this.consumeTokens(plan, execution, this.seedIds(plan));
+        }
         this.persistNode(plan, execution);
       } else if (
         options.retryFailed &&
@@ -463,9 +472,21 @@ export class GraphScheduler {
   }
 
   /**
-   * A token is pending on an edge when the source has completed more visits
-   * than the target has consumed, and the source's latest outcome satisfies
-   * the edge condition.
+   * A token is pending on an edge when the source has offered more tokens than
+   * the target has consumed on that edge.
+   *
+   * When `tokensOffered` (source) and `tokensConsumed` (target) are present —
+   * fresh plans compiled in-process — per-edge precision is used: each
+   * completed source visit credits one token on every outgoing edge whose
+   * condition the outcome satisfies (including `always`), and each target visit
+   * consumes one token from each incoming edge that had an unspent token. This
+   * prevents phantom tokens on `success`/`failure`/`selected` edges and avoids
+   * false-blocking on `all`-activation nodes that share a source across
+   * condition and `always` edges.
+   *
+   * When either field is absent (a plan loaded from the database before this
+   * field existed), the legacy `completedVisits + condition` model is used as a
+   * fallback so persisted runs continue to route correctly.
    */
   private tokenPending(
     plan: ExecutionPlan,
@@ -476,6 +497,15 @@ export class GraphScheduler {
     const source = byId.get(edge.source);
     const target = byId.get(edge.target);
     if (!source || !target) return false;
+
+    // New per-edge model: precise token tracking.
+    if (source.tokensOffered !== undefined && target.tokensConsumed !== undefined) {
+      const offered = source.tokensOffered[edge.id] ?? 0;
+      const consumed = target.tokensConsumed[edge.id] ?? 0;
+      return offered > consumed;
+    }
+
+    // Fallback: legacy per-visit model.
     const sourceCompleted = this.completedVisits(source);
     const consumed = seeds.has(target.nodeId)
       ? Math.max(0, target.visits - (target.visits > 0 ? 1 : 0))
@@ -490,6 +520,76 @@ export class GraphScheduler {
         return source.status === "failed";
       case "selected":
         return source.outcome?.selectedEdgeIds.includes(edge.id) ?? false;
+    }
+  }
+
+  /**
+   * After a node visit reaches a terminal state, credit one token on each
+   * outgoing edge whose condition the visit's outcome satisfies — including
+   * `always` edges, which credit a token on every terminal visit. This
+   * per-visit, per-edge precision is what prevents phantom tokens: a failed
+   * visit does not offer a success or selected token even if a later retry of
+   * the same node succeeds.
+   */
+  private offerTokens(plan: ExecutionPlan, execution: NodeExecution): void {
+    for (const edge of plan.edges) {
+      if (edge.source !== execution.nodeId) continue;
+      let satisfied = false;
+      switch (edge.when) {
+        case "always":
+          satisfied = true;
+          break;
+        case "success":
+          satisfied = execution.status === "succeeded";
+          break;
+        case "failure":
+          satisfied = execution.status === "failed";
+          break;
+        case "selected":
+          satisfied = execution.outcome?.selectedEdgeIds.includes(edge.id) ?? false;
+          break;
+      }
+      if (satisfied) {
+        const current = execution.tokensOffered ?? {};
+        execution.tokensOffered = {
+          ...current,
+          [edge.id]: (current[edge.id] ?? 0) + 1,
+        };
+      }
+    }
+  }
+
+  /**
+   * When a node completes a visit, consume one token from each incoming edge
+   * that has an unspent token. For `all`-activation nodes all pending incoming
+   * edges are consumed (all were required for readiness); for `any`-activation
+   * nodes each pending edge loses one token (the visit was triggered by at
+   * least one, and consuming from all pending edges is the conservative
+   * choice that prevents a condition edge's token from being double-spent).
+   *
+   * Seed nodes get their first visit for free — it is triggered by the seed
+   * mechanism, not by incoming tokens — so consumption is skipped when a seed
+   * goes from 0→1 visits.
+   */
+  private consumeTokens(
+    plan: ExecutionPlan,
+    execution: NodeExecution,
+    seeds: Set<string>,
+  ): void {
+    if (seeds.has(execution.nodeId) && execution.visits === 1) return;
+    const byId = new Map(plan.nodes.map((item) => [item.nodeId, item]));
+    for (const edge of plan.edges) {
+      if (edge.target !== execution.nodeId) continue;
+      const source = byId.get(edge.source);
+      if (!source) continue;
+      const offered = source.tokensOffered?.[edge.id] ?? 0;
+      const consumed = execution.tokensConsumed?.[edge.id] ?? 0;
+      if (offered > consumed) {
+        execution.tokensConsumed = {
+          ...(execution.tokensConsumed ?? {}),
+          [edge.id]: consumed + 1,
+        };
+      }
     }
   }
 
@@ -581,7 +681,7 @@ export class GraphScheduler {
     plan: ExecutionPlan,
     node: CompiledNode,
   ): Promise<void> {
-    const execution = plan.nodes.find((item) => item.nodeId === node.id)!;
+    let execution = plan.nodes.find((item) => item.nodeId === node.id)!;
     execution.status = "queued";
     execution.visits += 1;
     execution.status = "running";
@@ -596,6 +696,15 @@ export class GraphScheduler {
         this.nodeContext(plan, node),
       );
       await this.passCheckpoint(plan, execution, node);
+      // Checkpoint nodes only reach terminal states (succeeded/failed) here;
+      // a manual checkpoint that didn't pause returns "succeeded" or "failed".
+      if (
+        (execution.status as string) === "succeeded" ||
+        (execution.status as string) === "failed"
+      ) {
+        this.offerTokens(plan, execution);
+        this.consumeTokens(plan, execution, this.seedIds(plan));
+      }
       this.persistNode(plan, execution);
       this.observer.nodeFinished(node, execution);
       return;
@@ -619,6 +728,8 @@ export class GraphScheduler {
       } catch (error) {
         execution.status = "failed";
         execution.error = errorMessage(error);
+        this.offerTokens(plan, execution);
+        this.consumeTokens(plan, execution, this.seedIds(plan));
         this.persistNode(plan, execution);
         this.observer.nodeStarted(
           node,
@@ -737,9 +848,22 @@ export class GraphScheduler {
     } finally {
       this.inFlight.delete(attempt);
     }
+    // A plan patch (e.g. retry/replace/insert) deep-clones plan.nodes on
+    // commit, so the `execution` reference captured above is now stale.
+    // Re-resolve it from the live plan so persistence targets the current
+    // node object. A completed node can only be retried by its own patch
+    // (not removed or superseded — those target pending nodes only), so the
+    // node must still be present after patching.
+    execution = plan.nodes.find((item) => item.nodeId === node.id)!;
     // A node worktree whose attempt did not succeed never merges.
     if (execution.status !== "succeeded") {
       await this.discardWorkspace(node);
+    }
+    // Credit edge tokens for terminal succeeded/failed visits and consume
+    // incoming-edge tokens; a cancelled visit offers no tokens.
+    if (execution.status === "succeeded" || execution.status === "failed") {
+      this.offerTokens(plan, execution);
+      this.consumeTokens(plan, execution, this.seedIds(plan));
     }
     this.persistNode(plan, execution);
     this.observer.nodeFinished(node, execution);
@@ -824,6 +948,10 @@ export class GraphScheduler {
           target.error =
             `Merge conflict merging node ${conflict.nodeId} at checkpoint ` +
             `${node.id}: ${conflict.files.join(", ") || "unknown files"}.`;
+          // The node's status changed after its original offerTokens call
+          // (it completed as "succeeded" in the harness). Credit failure-edge
+          // tokens now so recovery routing can activate.
+          this.offerTokens(plan, target);
           this.persistNode(plan, target);
         }
       } catch (error) {

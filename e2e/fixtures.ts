@@ -37,7 +37,14 @@ export async function launchApp(
   const seedPath = writeSeedFixture(userDataDir, options);
   const app = await electron.launch({
     executablePath: EXECUTABLE,
-    args: ["--no-sandbox", "--disable-gpu"],
+    args: [
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-gpu-sandbox",
+      "--disable-software-rasterizer",
+      "--disable-dev-shm-usage",
+      "--disable-features=GPUMemoryBufferVideoFrames,VizDisplayCompositor",
+    ],
     env: {
       ...process.env,
       SPIRE_USER_DATA: userDataDir,
