@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -7,12 +7,13 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  useEdgesState,
+  useNodesState,
   useReactFlow,
   type Edge,
   type Node,
-  type NodeChange,
   type NodeTypes,
-  applyNodeChanges,
+  type OnNodeDrag,
 } from "@xyflow/react";
 import {
   Box,
@@ -423,31 +424,43 @@ function CanvasView({
     };
   }, [containerRef, fitView]);
 
-  const nodes = useMemo(
-    () => buildCanvasNodes(graph, plan, collapsedGroups),
-    [graph, plan, collapsedGroups],
+  // Local canvas state. ReactFlow drives these through onNodesChange on every
+  // pointermove during a drag, so position updates never touch the global
+  // store (which previously rebuilt the entire canvas per frame and made
+  // dragging unusable).
+  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>(
+    buildCanvasNodes(graph, plan, collapsedGroups),
+  );
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
+    buildCanvasEdges(graph, plan),
   );
 
-  const edges = useMemo(
-    () => buildCanvasEdges(graph, plan),
-    [graph, plan],
-  );
+  const draggingRef = useRef(false);
 
-  const onNodesChange = useCallback(
-    (changes: NodeChange[]) => {
-      const changed = applyNodeChanges(changes, nodes);
-      const positions = new Map(
-        changed.map((node) => [node.id, node.position]),
-      );
+  useEffect(() => {
+    if (draggingRef.current) return;
+    setNodes(buildCanvasNodes(graph, plan, collapsedGroups));
+    setEdges(buildCanvasEdges(graph, plan));
+  }, [graph, plan, collapsedGroups, setNodes, setEdges]);
+
+  const handleNodeDragStart = useCallback(() => {
+    draggingRef.current = true;
+  }, []);
+
+  // Commit the final position to the store exactly once per drag, not on every
+  // pointermove. This keeps the store graph in sync while leaving ReactFlow's
+  // per-frame position updates purely local.
+  const handleNodeDragStop = useCallback<OnNodeDrag<CanvasFlowNode>>(
+    (_event, node) => {
+      draggingRef.current = false;
       updateGraph({
         ...graph,
-        nodes: graph.nodes.map((node) => ({
-          ...node,
-          position: positions.get(node.id) ?? node.position,
-        })),
+        nodes: graph.nodes.map((item) =>
+          item.id === node.id ? { ...item, position: node.position } : item,
+        ),
       } as GraphLike);
     },
-    [graph, nodes, updateGraph],
+    [graph, updateGraph],
   );
 
   return (
@@ -456,8 +469,11 @@ function CanvasView({
       edges={edges}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
       onNodeClick={(_event, node) => selectNode(node.id)}
       onPaneClick={() => selectNode(undefined)}
+      onNodeDragStart={handleNodeDragStart}
+      onNodeDragStop={handleNodeDragStop}
       fitView
       minZoom={0.55}
       maxZoom={1.6}
