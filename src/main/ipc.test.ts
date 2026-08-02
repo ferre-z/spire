@@ -42,6 +42,7 @@ import type {
   HarnessSessionRef,
 } from "../shared/harness";
 import { createHarnessRegistry } from "./harness/registry";
+import { migrateLegacyGraph } from "./graph-migration";
 import { RunEngine } from "./run-engine";
 import type { ExecutionBackend, PreparedWorkspace } from "./worktree";
 
@@ -318,6 +319,7 @@ describe("IPC adapter: renderer operation → control capability mapping", () =>
       graphs: [],
       runs: [],
     });
+    expect(snapshot).not.toHaveProperty("models");
   });
 
   it("maps detectOpenCode to harnesses.list and returns a snapshot", async () => {
@@ -332,23 +334,43 @@ describe("IPC adapter: renderer operation → control capability mapping", () =>
     });
   });
 
-  it("maps connectOpenRouter through SpireControl (no capability bypass)", async () => {
-    const { control, harness, executeSpy } = setup();
-    const connectSpy = vi.spyOn(control, "connectOpenRouter");
-    const snapshot = (await invoke(IPC.connectOpenRouter, {
-      apiKey: "  key-1 ",
-    })) as Record<string, unknown>;
-    expect(connectSpy).toHaveBeenCalledWith({ apiKey: "  key-1 " });
-    expect(harness.connectedApiKey).toBe("key-1");
+  it("maps completeOnboarding through SpireControl without exposing credentials", async () => {
+    const { control, executeSpy } = setup();
+    const completeSpy = vi.spyOn(control, "completeOnboarding");
+    const selection = {
+      harnessId: "opencode" as const,
+      modelId: "openrouter/test-model",
+    };
+    const snapshot = (await invoke(IPC.completeOnboarding, selection)) as Record<
+      string,
+      unknown
+    >;
+    expect(completeSpy).toHaveBeenCalledWith(selection);
     expect(snapshot).toMatchObject({ onboardingComplete: true });
-    // Onboarding is a composed facade flow; it must not dispatch a capability
-    // under the renderer's feet.
+    expect(IPC).not.toHaveProperty("connectOpenRouter");
+    expect(JSON.stringify(IPC)).not.toMatch(/api.?key/i);
     expect(executedCapabilities(executeSpy)).toEqual([]);
+  });
+
+  it("rejects a malformed onboarding selection", async () => {
+    setup();
+    await expect(
+      invoke(IPC.completeOnboarding, {
+        harnessId: "opencode",
+        modelId: "",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      invoke(IPC.completeOnboarding, { harnessId: "unknown", modelId: "m" }),
+    ).rejects.toThrow();
   });
 
   it("maps saveGraph to graphs.save and returns the updated snapshot", async () => {
     const { executeSpy } = setup();
-    const snapshot = (await invoke(IPC.saveGraph, graph())) as Record<
+    const snapshot = (await invoke(
+      IPC.saveGraph,
+      migrateLegacyGraph(graph()),
+    )) as Record<
       string,
       unknown
     >;
@@ -468,14 +490,6 @@ describe("IPC adapter: malformed payloads are rejected", () => {
         schemaVersion: 99,
       }),
     ).rejects.toThrow(/Workspace layout rejected/);
-  });
-
-  it("rejects a malformed OpenRouter input", async () => {
-    setup();
-    await expect(invoke(IPC.connectOpenRouter, {})).rejects.toThrow();
-    await expect(
-      invoke(IPC.connectOpenRouter, { apiKey: "   " }),
-    ).rejects.toThrow(/api key/i);
   });
 
   it("rejects new corporate-workflow operations with malformed inputs", async () => {

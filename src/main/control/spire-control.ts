@@ -26,18 +26,20 @@ import {
 } from "../../shared/control";
 import type {
   AppSnapshot,
-  GraphDefinition,
   GraphDefinitionV2,
   HarnessId,
   ModelOption,
+  OnboardingSelection,
   OpenCodeStatus,
-  ProviderInput,
   RunArtifacts,
   RunRecord,
   StartRunInput,
   UpdateGraphInput,
 } from "../../shared/domain";
-import { graphDefinitionV2Schema } from "../../shared/domain";
+import {
+  graphDefinitionV2Schema,
+  onboardingSelectionSchema,
+} from "../../shared/domain";
 import type {
   AppliedPlanPatch,
   ExecutionPlan,
@@ -189,7 +191,6 @@ export class SpireControl {
     compatible: false,
     connected: false,
   };
-  private modelsCache: ModelOption[] = [];
 
   constructor(private readonly deps: SpireControlDeps) {
     this.environment = deps.environment ?? defaultEnvironment();
@@ -297,8 +298,7 @@ export class SpireControl {
       onboardingComplete:
         this.deps.database.getSetting("onboardingComplete") === "true",
       openCode: this.openCodeStatus,
-      models: this.modelsCache,
-      graphs: this.deps.database.listGraphs(),
+      graphs: this.deps.database.listGraphsV2(),
       runs: this.deps.database.listRuns(),
       activeRunId: this.deps.engine.activeId,
     };
@@ -309,21 +309,26 @@ export class SpireControl {
     return this.snapshot();
   }
 
-  async connectOpenRouter(input: ProviderInput): Promise<AppSnapshot> {
-    if (!input.apiKey.trim()) throw new Error("OpenRouter API key is required.");
-    await this.deps.harness.connectOpenRouter(input.apiKey.trim());
-    this.modelsCache = await this.deps.harness.models();
-    if (this.modelsCache.length === 0) {
-      throw new Error("OpenRouter connected, but no models were returned.");
+  async completeOnboarding(selection: OnboardingSelection): Promise<AppSnapshot> {
+    const parsed = onboardingSelectionSchema.parse(selection);
+    const adapter = this.deps.registry.get(parsed.harnessId);
+    const status = await adapter.probe();
+    if (!status.installed) throw new Error("Selected harness is unavailable.");
+    if (!status.compatible) throw new Error("Selected harness is incompatible.");
+    if (!status.connected) throw new Error("Selected harness is disconnected.");
+    const models = await adapter.listModels();
+    if (!models.some((model) => model.id === parsed.modelId)) {
+      throw new Error("Selected model is not available.");
     }
-    this.openCodeStatus = {
-      ...(await this.deps.harness.detect()),
-      connected: true,
-    };
+    if (parsed.harnessId === "opencode") {
+      const { harnessId, ...openCode } = status;
+      void harnessId;
+      this.openCodeStatus = openCode;
+    }
+    if (this.deps.database.listGraphsV2().length === 0) {
+      this.deps.database.saveGraphV2(this.defaultGraph(parsed));
+    }
     this.deps.database.setSetting("onboardingComplete", "true");
-    if (this.deps.database.listGraphs().length === 0) {
-      this.deps.database.saveGraph(this.defaultGraph(this.modelsCache[0].id));
-    }
     return this.snapshot();
   }
 
@@ -344,23 +349,23 @@ export class SpireControl {
       platform: this.environment.platform,
       isWayland: this.environment.isWayland,
       openCode: this.openCodeStatus,
-      graphCount: this.deps.database.listGraphs().length,
+      graphCount: this.deps.database.listGraphsV2().length,
       runCount: this.deps.database.listRuns().length,
     };
   }
 
   handleGraphsList(input: PageInput): GraphPage {
     const result = page(
-      this.deps.database.listGraphs(),
+      this.deps.database.listGraphsV2(),
       parseCursor(input.cursor),
       input.limit,
     );
     return { graphs: result.items, nextCursor: result.nextCursor };
   }
 
-  handleGraphsGet(input: GraphRef): GraphDefinition {
+  handleGraphsGet(input: GraphRef): GraphDefinitionV2 {
     const versions = this.deps.database
-      .listGraphs()
+      .listGraphsV2()
       .filter((item) => item.id === input.graphId);
     if (versions.length === 0) throw new Error("Graph not found.");
     if (input.version !== undefined) {
@@ -373,20 +378,19 @@ export class SpireControl {
     );
   }
 
-  handleGraphsSave(input: UpdateGraphInput): GraphDefinition {
+  handleGraphsSave(input: UpdateGraphInput): GraphDefinitionV2 {
     const parsed = input.graph;
     const existing = this.deps.database
-      .listGraphs()
+      .listGraphsV2()
       .filter((item) => item.id === parsed.id);
     const highestVersion = Math.max(0, ...existing.map((item) => item.version));
-    const changed = existing.find((item) => item.version === parsed.version);
-    const version = changed ? highestVersion + 1 : parsed.version;
-    const saved: GraphDefinition = {
+    const version = existing.length > 0 ? highestVersion + 1 : parsed.version;
+    const saved: GraphDefinitionV2 = {
       ...parsed,
       version,
       createdAt: new Date().toISOString(),
     };
-    this.deps.database.saveGraph(saved);
+    this.deps.database.saveGraphV2(saved);
     return saved;
   }
 
@@ -506,11 +510,7 @@ export class SpireControl {
   async handleHarnessesModels(input: {
     harnessId: HarnessId;
   }): Promise<ModelOption[]> {
-    const models = await this.deps.registry.get(input.harnessId).listModels();
-    if (input.harnessId === "opencode") {
-      this.modelsCache = models;
-    }
-    return models;
+    return this.deps.registry.get(input.harnessId).listModels();
   }
 
   handleTracesQuery(input: TraceFilter): TracePage {
@@ -603,33 +603,44 @@ export class SpireControl {
     return run;
   }
 
-  private defaultGraph(model: string): GraphDefinition {
+  private defaultGraph(selection: OnboardingSelection): GraphDefinitionV2 {
     const now = new Date().toISOString();
     return {
       id: randomUUID(),
       name: "Build & Review",
       version: 1,
-      maxIterations: 3,
+      maxSteps: 100,
+      groups: [],
       createdAt: now,
       nodes: [
         {
           id: "planner",
-          type: "opencode",
-          role: "planner",
+          kind: "agent",
           name: "Architect",
-          model,
-          instructions:
+          roleLabel: "planner",
+          harnessId: selection.harnessId,
+          modelId: selection.modelId,
+          job:
             "Turn coding goals into focused implementation briefs, then review the result with high standards.",
+          access: { mode: "read-only", writeScopes: [] },
+          authority: { scope: "graph", actions: [] },
+          activation: "any",
+          maxVisits: 3,
           position: { x: 160, y: 190 },
         },
         {
           id: "implementer",
-          type: "opencode",
-          role: "implementer",
+          kind: "agent",
           name: "Builder",
-          model,
-          instructions:
+          roleLabel: "implementer",
+          harnessId: selection.harnessId,
+          modelId: selection.modelId,
+          job:
             "Implement the brief carefully, keep changes scoped, and validate the result before reporting.",
+          access: { mode: "workspace-write", writeScopes: ["."] },
+          authority: { scope: "self", actions: [] },
+          activation: "any",
+          maxVisits: 3,
           position: { x: 570, y: 190 },
         },
       ],
@@ -638,21 +649,24 @@ export class SpireControl {
           id: "plan-build",
           source: "planner",
           target: "implementer",
-          condition: "always",
+          kind: "handoff",
+          when: "selected",
           label: "task brief",
         },
         {
           id: "build-review",
           source: "implementer",
           target: "planner",
-          condition: "always",
+          kind: "review",
+          when: "success",
           label: "review",
         },
         {
           id: "revise",
           source: "planner",
           target: "implementer",
-          condition: "needs_changes",
+          kind: "handoff",
+          when: "failure",
           label: "revise",
         },
       ],

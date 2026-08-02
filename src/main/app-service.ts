@@ -1,7 +1,7 @@
 import type {
   AppSnapshot,
-  GraphDefinition,
-  ProviderInput,
+  GraphDefinitionV2,
+  OnboardingSelection,
   RunRecord,
   StartRunInput,
 } from "../shared/domain";
@@ -48,11 +48,11 @@ export class AppService {
     return this.control.detectOpenCode();
   }
 
-  connectOpenRouter(input: ProviderInput): Promise<AppSnapshot> {
-    return this.control.connectOpenRouter(input);
+  completeOnboarding(selection: OnboardingSelection): Promise<AppSnapshot> {
+    return this.control.completeOnboarding(selection);
   }
 
-  async saveGraph(graph: GraphDefinition): Promise<AppSnapshot> {
+  async saveGraph(graph: GraphDefinitionV2): Promise<AppSnapshot> {
     await this.control.execute("graphs.save", { graph });
     return this.control.snapshot();
   }

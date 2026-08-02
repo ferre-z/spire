@@ -7,7 +7,6 @@ import {
   runRecordSchema,
   runStatusSchema,
   type AppSnapshot,
-  type GraphDefinition,
   type GraphDefinitionV2,
   type HarnessId,
   type ModelOption,
@@ -73,8 +72,7 @@ export const modelOptionSchema = z.strictObject({
 export const appSnapshotSchema = z.strictObject({
   onboardingComplete: z.boolean(),
   openCode: openCodeStatusSchema,
-  models: z.array(modelOptionSchema),
-  graphs: z.array(graphDefinitionSchema),
+  graphs: z.array(graphDefinitionV2Schema),
   runs: z.array(runRecordSchema),
   activeRunId: z.string().optional(),
 }) satisfies z.ZodType<AppSnapshot>;
@@ -86,7 +84,7 @@ export const startRunInputSchema = z.strictObject({
 }) satisfies z.ZodType<StartRunInput>;
 
 export const updateGraphInputSchema = z.strictObject({
-  graph: graphDefinitionSchema,
+  graph: graphDefinitionV2Schema,
 }) satisfies z.ZodType<UpdateGraphInput>;
 
 /** Shared pagination envelope for list operations. */
@@ -103,7 +101,7 @@ export const graphRefSchema = z.strictObject({
 export type GraphRef = z.infer<typeof graphRefSchema>;
 
 export const graphPageSchema = z.strictObject({
-  graphs: z.array(graphDefinitionSchema),
+  graphs: z.array(graphDefinitionV2Schema),
   nextCursor: z.string().min(1).nullable(),
 });
 export type GraphPage = z.infer<typeof graphPageSchema>;
@@ -260,8 +258,8 @@ export type ControlOperationMap = {
   "state.get": { input: Record<string, never>; output: AppSnapshot };
   "diagnostics.get": { input: Record<string, never>; output: Diagnostics };
   "graphs.list": { input: PageInput; output: GraphPage };
-  "graphs.get": { input: GraphRef; output: GraphDefinition };
-  "graphs.save": { input: UpdateGraphInput; output: GraphDefinition };
+  "graphs.get": { input: GraphRef; output: GraphDefinitionV2 };
+  "graphs.save": { input: UpdateGraphInput; output: GraphDefinitionV2 };
   "repositories.validate": {
     input: { path: string };
     output: RepositoryValidation;
@@ -329,14 +327,14 @@ export const CONTROL_CAPABILITIES: ControlCapabilities = {
   "graphs.get": {
     ...READ,
     inputSchema: graphRefSchema,
-    outputSchema: graphDefinitionSchema,
+    outputSchema: graphDefinitionV2Schema,
   },
   "graphs.save": {
     readOnly: false,
     destructive: false,
     idempotent: true,
     inputSchema: updateGraphInputSchema,
-    outputSchema: graphDefinitionSchema,
+    outputSchema: graphDefinitionV2Schema,
   },
   "repositories.validate": {
     ...READ,
