@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type {
+  AppSnapshot,
   GraphDefinitionV2,
   GraphNode,
-  HarnessId,
   ModelOption,
 } from "../shared/domain";
 import type {
@@ -16,11 +16,10 @@ import type {
 } from "../shared/control";
 import { useAppStore } from "./store";
 
-function snapshot(): Record<string, unknown> {
+function snapshot(): AppSnapshot {
   return {
     onboardingComplete: true,
     openCode: { installed: true, compatible: true, connected: true },
-    models: [{ id: "gpt-4", name: "GPT-4" }],
     graphs: [],
     runs: [
       {
@@ -29,12 +28,42 @@ function snapshot(): Record<string, unknown> {
         graphVersion: 1,
         repositoryPath: "/repo",
         goal: "test goal",
-        status: "running",
+        status: "implementing",
         iteration: 0,
         startedAt: new Date().toISOString(),
         events: [],
       },
     ],
+  };
+}
+
+function makeGraph(
+  overrides: Partial<GraphDefinitionV2> = {},
+): GraphDefinitionV2 {
+  return {
+    id: "graph-1",
+    name: "Graph",
+    version: 1,
+    nodes: [
+      {
+        kind: "agent",
+        id: "node-1",
+        name: "Builder",
+        job: "Build it",
+        harnessId: "opencode",
+        modelId: "gpt-4",
+        access: { mode: "read-only", writeScopes: [] },
+        authority: { scope: "self", actions: [] },
+        activation: "all",
+        maxVisits: 3,
+        position: { x: 100, y: 100 },
+      },
+    ],
+    edges: [],
+    groups: [],
+    maxSteps: 100,
+    createdAt: new Date().toISOString(),
+    ...overrides,
   };
 }
 
@@ -101,6 +130,12 @@ function makeHarness(
 
 const spire: Record<string, ReturnType<typeof vi.fn>> = {};
 
+function currentGraph(): GraphDefinitionV2 {
+  const graph = useAppStore.getState().graph;
+  if (!graph) throw new Error("A graph must be selected for this test.");
+  return graph;
+}
+
 beforeEach(() => {
   for (const key of [
     "snapshot",
@@ -120,7 +155,7 @@ beforeEach(() => {
     spire[key] = vi.fn();
   }
   spire.snapshot.mockResolvedValue(snapshot());
-  (window as { spire?: unknown }).spire = spire;
+  Reflect.set(window, "spire", spire);
   useAppStore.setState({
     snapshot: undefined,
     graph: undefined,
@@ -128,16 +163,25 @@ beforeEach(() => {
     selectedRunId: undefined,
     plan: undefined,
     planLoading: false,
+    planPatches: [],
     nodeExecutions: [],
+    nodeExecutionsLoading: false,
+    nodeExecutionsHasMore: false,
+    nodeExecutionsCursor: undefined,
     messages: [],
+    messagesLoading: false,
+    messagesHasMore: false,
+    messagesCursor: undefined,
     harnesses: [],
     harnessModels: {},
     selectedPatchId: undefined,
+    validationResult: undefined,
+    error: undefined,
   });
 });
 
 afterEach(() => {
-  delete (window as { spire?: unknown }).spire;
+  Reflect.deleteProperty(window, "spire");
 });
 
 describe("store: v2 graph support", () => {
@@ -214,6 +258,51 @@ describe("store: validateGraph", () => {
     expect(result).toEqual({ valid: false, issues: ["missing nodes"] });
   });
 });
+
+describe("store: saveCurrentGraph", () => {
+  it("does not save an invalid graph and exposes validation errors", async () => {
+    useAppStore.setState({ graph: makeGraph(), error: undefined });
+    spire.graphsValidate.mockResolvedValue({
+      valid: false,
+      issues: ["A graph needs an entry node."],
+    });
+
+    const saved = await useAppStore.getState().saveCurrentGraph();
+
+    expect(saved).toBe(false);
+    expect(spire.saveGraph).not.toHaveBeenCalled();
+    expect(useAppStore.getState().validationResult).toEqual({
+      valid: false,
+      issues: ["A graph needs an entry node."],
+    });
+    expect(useAppStore.getState().error).toContain("A graph needs an entry node.");
+  });
+
+  it("validates before saving and selects the newest saved version", async () => {
+    const selectedGraph = makeGraph();
+    const savedGraph = makeGraph({ version: 2 });
+    useAppStore.setState({
+      graph: selectedGraph,
+      selectedNodeId: "node-1",
+      error: "old error",
+    });
+    spire.graphsValidate.mockResolvedValue({ valid: true, issues: [] });
+    spire.saveGraph.mockResolvedValue(snapshotWithGraphs([selectedGraph, savedGraph]));
+
+    const saved = await useAppStore.getState().saveCurrentGraph();
+
+    expect(saved).toBe(true);
+    expect(spire.graphsValidate).toHaveBeenCalledWith(selectedGraph);
+    expect(spire.saveGraph).toHaveBeenCalledWith(selectedGraph);
+    expect(useAppStore.getState().graph?.version).toBe(2);
+    expect(useAppStore.getState().selectedNodeId).toBe("node-1");
+    expect(useAppStore.getState().error).toBeUndefined();
+  });
+});
+
+function snapshotWithGraphs(graphs: GraphDefinitionV2[]): AppSnapshot {
+  return { ...snapshot(), graphs };
+}
 
 describe("store: loadPlan", () => {
   it("fetches the plan for the selected run and stores it", async () => {
@@ -308,7 +397,7 @@ describe("store: loadMessages", () => {
         nextCursor: "page2",
       })
       .mockResolvedValueOnce({
-        messages: [makeMessage({ sequence: 2 })],
+        messages: [makeMessage({ id: "msg-2", sequence: 2 })],
         nextCursor: null,
       });
     await useAppStore.getState().loadMessages();
@@ -316,6 +405,163 @@ describe("store: loadMessages", () => {
     await useAppStore.getState().loadMessages();
     expect(useAppStore.getState().messages).toHaveLength(2);
     expect(useAppStore.getState().messagesHasMore).toBe(false);
+  });
+
+  it("does not fetch a page after pagination is exhausted", async () => {
+    useAppStore.setState({ selectedRunId: "run-1" });
+    spire.runsMessagesList.mockResolvedValue({
+      messages: [makeMessage()],
+      nextCursor: null,
+    });
+
+    await useAppStore.getState().loadMessages();
+    await useAppStore.getState().loadMessages();
+
+    expect(spire.runsMessagesList).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("store: activateRun", () => {
+  it("clears stale runtime state before loading the selected run", async () => {
+    let resolvePlan: (plan: ExecutionPlan) => void = () => {};
+    const pendingPlan = new Promise<ExecutionPlan>((resolve) => {
+      resolvePlan = resolve;
+    });
+    spire.runsPlanGet.mockReturnValue(pendingPlan);
+    spire.runsNodesList.mockReturnValue(new Promise(() => {}));
+    spire.runsMessagesList.mockReturnValue(new Promise(() => {}));
+    useAppStore.setState({
+      selectedRunId: "run-1",
+      plan: makePlan(),
+      planPatches: [{
+        id: "patch-1",
+        baseRevision: 1,
+        appliedRevision: 2,
+        reason: "old",
+        operations: [],
+        actorNodeId: "planner",
+        appliedAt: new Date().toISOString(),
+      }],
+      nodeExecutions: [makeNodeExecution()],
+      nodeExecutionsCursor: "old-node-page",
+      nodeExecutionsHasMore: true,
+      messages: [makeMessage()],
+      messagesCursor: "old-message-page",
+      messagesHasMore: true,
+      error: "old error",
+    });
+
+    void useAppStore.getState().activateRun("run-2");
+
+    const state = useAppStore.getState();
+    expect(state.selectedRunId).toBe("run-2");
+    expect(state.plan).toBeUndefined();
+    expect(state.planPatches).toEqual([]);
+    expect(state.nodeExecutions).toEqual([]);
+    expect(state.nodeExecutionsCursor).toBeUndefined();
+    expect(state.nodeExecutionsHasMore).toBe(false);
+    expect(state.messages).toEqual([]);
+    expect(state.messagesCursor).toBeUndefined();
+    expect(state.messagesHasMore).toBe(false);
+    expect(state.error).toBeUndefined();
+
+    resolvePlan(makePlan({ runId: "run-2" }));
+  });
+
+  it("ignores an older activation response after a newer run is selected", async () => {
+    let resolveOldPlan: (plan: ExecutionPlan) => void = () => {};
+    let resolveOldNodes: (page: { nodes: NodeExecution[]; nextCursor: null }) => void = () => {};
+    let resolveOldMessages: (page: { messages: CollaborationMessage[]; nextCursor: null }) => void = () => {};
+    const oldPlan = new Promise<ExecutionPlan>((resolve) => {
+      resolveOldPlan = resolve;
+    });
+    const oldNodes = new Promise<{ nodes: NodeExecution[]; nextCursor: null }>((resolve) => {
+      resolveOldNodes = resolve;
+    });
+    const oldMessages = new Promise<{ messages: CollaborationMessage[]; nextCursor: null }>((resolve) => {
+      resolveOldMessages = resolve;
+    });
+    spire.runsPlanGet.mockImplementation((runId: string) =>
+      runId === "run-1" ? oldPlan : Promise.resolve(makePlan({ runId })),
+    );
+    spire.runsNodesList.mockImplementation((input: { runId: string }) =>
+      input.runId === "run-1"
+        ? oldNodes
+        : Promise.resolve({
+            nodes: [makeNodeExecution({ nodeId: "new-node" })],
+            nextCursor: null,
+          }),
+    );
+    spire.runsMessagesList.mockImplementation((input: { runId: string }) =>
+      input.runId === "run-1"
+        ? oldMessages
+        : Promise.resolve({
+            messages: [makeMessage({ id: "new-message", runId: input.runId })],
+            nextCursor: null,
+          }),
+    );
+
+    const oldActivation = useAppStore.getState().activateRun("run-1");
+    await useAppStore.getState().activateRun("run-2");
+    resolveOldPlan(makePlan({ runId: "run-1" }));
+    resolveOldNodes({
+      nodes: [makeNodeExecution({ nodeId: "old-node" })],
+      nextCursor: null,
+    });
+    resolveOldMessages({
+      messages: [makeMessage({ id: "old-message" })],
+      nextCursor: null,
+    });
+    await oldActivation;
+
+    const state = useAppStore.getState();
+    expect(state.selectedRunId).toBe("run-2");
+    expect(state.plan?.runId).toBe("run-2");
+    expect(state.nodeExecutions.map((node) => node.nodeId)).toEqual(["new-node"]);
+    expect(state.messages.map((message) => message.id)).toEqual(["new-message"]);
+  });
+
+  it("deduplicates initial and event-refreshed runtime pages", async () => {
+    const latestMessage = makeMessage({
+      id: "message-1",
+      sequence: 2,
+      createdAt: "2026-08-02T00:00:00.000Z",
+    });
+    spire.runsPlanGet.mockResolvedValue(makePlan());
+    spire.runsNodesList.mockResolvedValue({
+      nodes: [
+        makeNodeExecution({ nodeId: "node-1", status: "queued" }),
+        makeNodeExecution({ nodeId: "node-1", status: "running" }),
+      ],
+      nextCursor: null,
+    });
+    spire.runsMessagesList.mockResolvedValue({
+      messages: [
+        makeMessage({ id: "message-1", sequence: 1 }),
+        latestMessage,
+      ],
+      nextCursor: null,
+    });
+
+    await useAppStore.getState().activateRun("run-1");
+    await useAppStore.getState().receiveEvent({
+      id: "event-1",
+      runId: "run-1",
+      sequence: 1,
+      timestamp: new Date().toISOString(),
+      kind: "node.progress",
+      phase: "running",
+      message: "updated",
+    });
+
+    expect(useAppStore.getState().nodeExecutions).toEqual([
+      makeNodeExecution({ nodeId: "node-1", status: "running" }),
+    ]);
+    expect(useAppStore.getState().messages).toEqual([
+      latestMessage,
+    ]);
+    expect(spire.runsNodesList).toHaveBeenCalledTimes(2);
+    expect(spire.runsMessagesList).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -474,10 +720,64 @@ describe("store: harness actions", () => {
     spire.harnessesModels.mockResolvedValue(models);
     const result = await useAppStore
       .getState()
-      .loadHarnessModels("opencode" as HarnessId);
+      .loadHarnessModels("opencode");
     expect(spire.harnessesModels).toHaveBeenCalledWith("opencode");
     expect(result).toEqual(models);
     expect(useAppStore.getState().harnessModels["opencode"]).toEqual(models);
+  });
+
+  it("changes an agent harness and model together after loading its models", async () => {
+    const graph = makeGraph();
+    useAppStore.setState({ graph, error: undefined });
+    spire.harnessesModels.mockResolvedValue([
+      { id: "codex-mini", name: "Codex Mini" },
+      { id: "codex-max", name: "Codex Max" },
+    ]);
+
+    await useAppStore.getState().changeNodeHarness("node-1", "codex");
+
+    expect(spire.harnessesModels).toHaveBeenCalledWith("codex");
+    expect(useAppStore.getState().graph?.nodes[0]).toMatchObject({
+      id: "node-1",
+      harnessId: "codex",
+      modelId: "codex-mini",
+    });
+    expect(useAppStore.getState().error).toBeUndefined();
+  });
+
+  it("leaves a node unchanged and exposes an error when a harness has no models", async () => {
+    const graph = makeGraph();
+    useAppStore.setState({ graph, error: undefined });
+    spire.harnessesModels.mockResolvedValue([]);
+
+    await useAppStore.getState().changeNodeHarness("node-1", "codex");
+
+    expect(useAppStore.getState().graph).toBe(graph);
+    expect(useAppStore.getState().error).toContain("No models");
+  });
+});
+
+describe("store: applySnapshot", () => {
+  it("selects the latest version of the selected graph and preserves its selected node", () => {
+    const v1 = makeGraph({ version: 1 });
+    const v2 = makeGraph({ version: 2 });
+    useAppStore.setState({ graph: v1, selectedNodeId: "node-1" });
+
+    useAppStore.getState().applySnapshot(snapshotWithGraphs([v1, v2]));
+
+    expect(useAppStore.getState().graph).toBe(v2);
+    expect(useAppStore.getState().selectedNodeId).toBe("node-1");
+  });
+
+  it("clears the selected node when the latest graph no longer has it", () => {
+    const v1 = makeGraph({ version: 1 });
+    const v2 = makeGraph({ version: 2, nodes: [] });
+    useAppStore.setState({ graph: v1, selectedNodeId: "node-1" });
+
+    useAppStore.getState().applySnapshot(snapshotWithGraphs([v1, v2]));
+
+    expect(useAppStore.getState().graph).toBe(v2);
+    expect(useAppStore.getState().selectedNodeId).toBeUndefined();
   });
 });
 
@@ -526,32 +826,30 @@ describe("store: graph editing", () => {
       position: { x: 200, y: 200 },
     };
     useAppStore.getState().addNode(newNode);
-    expect(useAppStore.getState().graph!.nodes).toHaveLength(2);
-    expect(
-      (useAppStore.getState().graph!.nodes as GraphDefinitionV2["nodes"])[1].id,
-    ).toBe("d1");
+    expect(currentGraph().nodes).toHaveLength(2);
+    expect(currentGraph().nodes[1]?.id).toBe("d1");
   });
 
   it("removes a node and its connected edges", () => {
     useAppStore.getState().removeNode("a1");
-    expect(useAppStore.getState().graph!.nodes).toHaveLength(0);
+    expect(currentGraph().nodes).toHaveLength(0);
   });
 
   it("updates a node field via updateNode", () => {
     useAppStore.getState().updateNode("a1", { name: "Renamed" });
     expect(
-      useAppStore.getState().graph!.nodes[0].name,
+      currentGraph().nodes[0]?.name,
     ).toBe("Renamed");
   });
 
   it("adds and removes a group", () => {
     useAppStore.getState().addGroup({ id: "grp-1", name: "Team" });
     expect(
-      (useAppStore.getState().graph as GraphDefinitionV2)!.groups,
+      currentGraph().groups,
     ).toHaveLength(1);
     useAppStore.getState().removeGroup("grp-1");
     expect(
-      (useAppStore.getState().graph as GraphDefinitionV2)!.groups,
+      currentGraph().groups,
     ).toHaveLength(0);
   });
 
@@ -572,9 +870,9 @@ describe("store: graph editing", () => {
       when: "always",
       label: "dep",
     });
-    expect(useAppStore.getState().graph!.edges).toHaveLength(1);
+    expect(currentGraph().edges).toHaveLength(1);
     useAppStore.getState().removeEdge("e1");
-    expect(useAppStore.getState().graph!.edges).toHaveLength(0);
+    expect(currentGraph().edges).toHaveLength(0);
   });
 });
 

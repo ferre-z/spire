@@ -124,7 +124,7 @@ export function isGraphV2(graph: GraphLike): graph is GraphDefinitionV2 {
 
 type AppState = {
   snapshot?: AppSnapshot;
-  graph?: GraphLike;
+  graph?: GraphDefinitionV2;
   selectedNodeId?: string;
   selectedRunId?: string;
   repositoryPath: string;
@@ -175,16 +175,18 @@ type AppState = {
   catchUpTraces(): Promise<void>;
   receiveTraceEvent(event: TraceEvent): void;
   setTraceFilters(filters: TraceFilters): Promise<void>;
-  selectGraph(graph: GraphLike): void;
-  updateGraph(graph: GraphLike): void;
+  selectGraph(graph: GraphDefinitionV2): void;
+  updateGraph(graph: GraphDefinitionV2): void;
   selectNode(id?: string): void;
   selectRun(id?: string): void;
+  activateRun(runId: string): Promise<void>;
   setRepositoryPath(value: string): void;
   setGoal(value: string): void;
   setBusy(value: boolean): void;
   setError(value?: string): void;
   /** Control: graphs.validate */
   validateGraph(graph: Record<string, unknown>): Promise<GraphValidation>;
+  saveCurrentGraph(): Promise<boolean>;
   /** Control: runs.plan.get — fetches the live plan for the selected run. */
   loadPlan(): Promise<void>;
   /** Control: runs.nodes.list — fetches node executions for the selected run. */
@@ -213,6 +215,7 @@ type AppState = {
   loadHarnesses(): Promise<void>;
   /** Control: harnesses.models — fetches models for a harness. */
   loadHarnessModels(harnessId: HarnessId): Promise<ModelOption[]>;
+  changeNodeHarness(nodeId: string, harnessId: HarnessId): Promise<void>;
   /** Palette: inserts a v2 node into the current graph. */
   addNode(node: GraphNode): void;
   /** Removes a node and its connected edges. */
@@ -233,11 +236,154 @@ type AppState = {
   selectPatch(patchId?: string): void;
 };
 
-function latestGraph(graphs: GraphDefinition[]): GraphDefinition | undefined {
+function latestGraph(
+  graphs: readonly GraphDefinitionV2[],
+): GraphDefinitionV2 | undefined {
   return [...graphs].sort((a, b) => b.version - a.version)[0];
 }
 
+function deduplicateByKey<T>(
+  values: readonly T[],
+  key: (value: T) => string,
+): T[] {
+  const positions = new Map<string, number>();
+  const unique: T[] = [];
+  for (const value of values) {
+    const existingPosition = positions.get(key(value));
+    if (existingPosition === undefined) {
+      positions.set(key(value), unique.length);
+      unique.push(value);
+    } else {
+      unique[existingPosition] = value;
+    }
+  }
+  return unique;
+}
+
+function updateGraphNode(node: GraphNode, patch: Partial<GraphNode>): GraphNode {
+  const { id: ignoredId, kind: ignoredKind, ...fields } = patch;
+  void ignoredId;
+  void ignoredKind;
+  return { ...node, ...fields };
+}
+
+function validationInput(graph: GraphDefinitionV2): Record<string, unknown> {
+  return {
+    id: graph.id,
+    name: graph.name,
+    version: graph.version,
+    nodes: graph.nodes,
+    edges: graph.edges,
+    groups: graph.groups,
+    maxSteps: graph.maxSteps,
+    createdAt: graph.createdAt,
+  };
+}
+
 export const useAppStore = create<AppState>((set, get) => {
+  let runtimeActivationVersion = 0;
+
+  function isCurrentRuntimeRequest(runId: string, version: number): boolean {
+    return (
+      get().selectedRunId === runId &&
+      runtimeActivationVersion === version
+    );
+  }
+
+  async function loadPlanForRun(runId: string, version: number): Promise<void> {
+    if (!isCurrentRuntimeRequest(runId, version)) return;
+    set({ planLoading: true });
+    try {
+      const plan = await window.spire.runsPlanGet(runId);
+      if (!isCurrentRuntimeRequest(runId, version)) return;
+      set({ plan, planPatches: plan.patches });
+    } catch (error) {
+      if (isCurrentRuntimeRequest(runId, version)) {
+        set({ error: error instanceof Error ? error.message : String(error) });
+      }
+    } finally {
+      if (isCurrentRuntimeRequest(runId, version)) {
+        set({ planLoading: false });
+      }
+    }
+  }
+
+  async function loadNodeExecutionsForRun(
+    runId: string,
+    version: number,
+    replace: boolean,
+  ): Promise<void> {
+    const state = get();
+    if (!isCurrentRuntimeRequest(runId, version) || state.nodeExecutionsLoading) {
+      return;
+    }
+    if (!replace && state.nodeExecutionsCursor === null) return;
+    const cursor = replace ? undefined : state.nodeExecutionsCursor ?? undefined;
+    set({ nodeExecutionsLoading: true });
+    try {
+      const page = await window.spire.runsNodesList({
+        runId,
+        limit: CONTROL_PAGE_MAX_LIMIT,
+        cursor,
+      });
+      if (!isCurrentRuntimeRequest(runId, version)) return;
+      set((current) => ({
+        nodeExecutions: deduplicateByKey(
+          replace ? page.nodes : [...current.nodeExecutions, ...page.nodes],
+          (node) => node.nodeId,
+        ),
+        nodeExecutionsHasMore: page.nextCursor !== null,
+        nodeExecutionsCursor: page.nextCursor,
+      }));
+    } catch (error) {
+      if (isCurrentRuntimeRequest(runId, version)) {
+        set({ error: error instanceof Error ? error.message : String(error) });
+      }
+    } finally {
+      if (isCurrentRuntimeRequest(runId, version)) {
+        set({ nodeExecutionsLoading: false });
+      }
+    }
+  }
+
+  async function loadMessagesForRun(
+    runId: string,
+    version: number,
+    replace: boolean,
+  ): Promise<void> {
+    const state = get();
+    if (!isCurrentRuntimeRequest(runId, version) || state.messagesLoading) {
+      return;
+    }
+    if (!replace && state.messagesCursor === null) return;
+    const cursor = replace ? undefined : state.messagesCursor ?? undefined;
+    set({ messagesLoading: true });
+    try {
+      const page = await window.spire.runsMessagesList({
+        runId,
+        limit: CONTROL_PAGE_MAX_LIMIT,
+        cursor,
+      });
+      if (!isCurrentRuntimeRequest(runId, version)) return;
+      set((current) => ({
+        messages: deduplicateByKey(
+          replace ? page.messages : [...current.messages, ...page.messages],
+          (message) => message.id,
+        ),
+        messagesHasMore: page.nextCursor !== null,
+        messagesCursor: page.nextCursor,
+      }));
+    } catch (error) {
+      if (isCurrentRuntimeRequest(runId, version)) {
+        set({ error: error instanceof Error ? error.message : String(error) });
+      }
+    } finally {
+      if (isCurrentRuntimeRequest(runId, version)) {
+        set({ messagesLoading: false });
+      }
+    }
+  }
+
   /** Merge a journal page into the window and advance the live cursor. */
   function mergePage(page: TracePage): void {
     const state = get();
@@ -301,28 +447,32 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   applySnapshot(snapshot) {
     const current = get();
-    const currentGraph = current.graph
-      ? snapshot.graphs
-          .filter((item) => item.id === current.graph!.id)
-          .sort((a, b) => b.version - a.version)[0]
-      : undefined;
-    // Preserve a v2 graph (e.g. from promote) that isn't stored in the v1
-    // snapshot; fall back to the latest known v1 graph otherwise.
-    const graph = currentGraph ?? latestGraph(snapshot.graphs) ?? current.graph;
+    const graph = current.graph
+      ? latestGraph(snapshot.graphs.filter((item) => item.id === current.graph?.id)) ??
+        latestGraph(snapshot.graphs)
+      : latestGraph(snapshot.graphs);
+    const selectedNodeId =
+      current.selectedNodeId &&
+      graph?.nodes.some((node) => node.id === current.selectedNodeId)
+        ? current.selectedNodeId
+        : undefined;
     const selectedRunId =
       snapshot.activeRunId ??
       (current.selectedRunId &&
       snapshot.runs.some((run) => run.id === current.selectedRunId)
         ? current.selectedRunId
         : snapshot.runs[0]?.id);
-    set({ snapshot, graph, selectedRunId });
+    set({ snapshot, graph, selectedNodeId, selectedRunId });
   },
   async receiveEvent(event) {
     await get().refresh();
-    // When a run event arrives for the selected run, refresh the live plan
-    // so the canvas can overlay runtime state (queued/running/succeeded/…).
     if (event.runId && event.runId === get().selectedRunId) {
-      await get().loadPlan();
+      const version = runtimeActivationVersion;
+      await Promise.all([
+        loadPlanForRun(event.runId, version),
+        loadNodeExecutionsForRun(event.runId, version, true),
+        loadMessagesForRun(event.runId, version, true),
+      ]);
     }
   },
   selectGraph(graph) {
@@ -336,6 +486,31 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   selectRun(selectedRunId) {
     set({ selectedRunId });
+  },
+  async activateRun(selectedRunId) {
+    runtimeActivationVersion += 1;
+    const version = runtimeActivationVersion;
+    set({
+      selectedRunId,
+      plan: undefined,
+      planLoading: false,
+      planPatches: [],
+      nodeExecutions: [],
+      nodeExecutionsLoading: false,
+      nodeExecutionsHasMore: false,
+      nodeExecutionsCursor: undefined,
+      messages: [],
+      messagesLoading: false,
+      messagesHasMore: false,
+      messagesCursor: undefined,
+      selectedPatchId: undefined,
+      error: undefined,
+    });
+    await Promise.all([
+      loadPlanForRun(selectedRunId, version),
+      loadNodeExecutionsForRun(selectedRunId, version, true),
+      loadMessagesForRun(selectedRunId, version, true),
+    ]);
   },
   setRepositoryPath(repositoryPath) {
     set({ repositoryPath });
@@ -354,62 +529,49 @@ export const useAppStore = create<AppState>((set, get) => {
     set({ validationResult: result });
     return result;
   },
+  async saveCurrentGraph() {
+    const graph = get().graph;
+    if (!graph) {
+      set({ error: "Select a graph before saving." });
+      return false;
+    }
+    set({ error: undefined });
+    try {
+      const result = await get().validateGraph(validationInput(graph));
+      if (!result.valid) {
+        set({ error: result.issues.join(" ") || "Graph validation failed." });
+        return false;
+      }
+      const snapshot = await window.spire.saveGraph(graph);
+      get().applySnapshot(snapshot);
+      return true;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+  },
   async loadPlan() {
     const runId = get().selectedRunId;
     if (!runId) return;
-    set({ planLoading: true });
-    try {
-      const plan = await window.spire.runsPlanGet(runId);
-      set({ plan, planPatches: plan.patches });
-    } catch (error) {
-      traceError(error);
-    } finally {
-      set({ planLoading: false });
-    }
+    await loadPlanForRun(runId, runtimeActivationVersion);
   },
   async loadNodeExecutions() {
     const runId = get().selectedRunId;
     if (!runId) return;
-    if (get().nodeExecutionsLoading) return;
-    set({ nodeExecutionsLoading: true });
-    try {
-      const page = await window.spire.runsNodesList({
-        runId,
-        limit: CONTROL_PAGE_MAX_LIMIT,
-        cursor: get().nodeExecutionsCursor ?? undefined,
-      });
-      set((state) => ({
-        nodeExecutions: [...state.nodeExecutions, ...page.nodes],
-        nodeExecutionsHasMore: page.nextCursor !== null,
-        nodeExecutionsCursor: page.nextCursor,
-      }));
-    } catch (error) {
-      traceError(error);
-    } finally {
-      set({ nodeExecutionsLoading: false });
-    }
+    await loadNodeExecutionsForRun(
+      runId,
+      runtimeActivationVersion,
+      get().nodeExecutionsCursor === undefined,
+    );
   },
   async loadMessages() {
     const runId = get().selectedRunId;
     if (!runId) return;
-    if (get().messagesLoading) return;
-    set({ messagesLoading: true });
-    try {
-      const page = await window.spire.runsMessagesList({
-        runId,
-        limit: CONTROL_PAGE_MAX_LIMIT,
-        cursor: get().messagesCursor ?? undefined,
-      });
-      set((state) => ({
-        messages: [...state.messages, ...page.messages],
-        messagesHasMore: page.nextCursor !== null,
-        messagesCursor: page.nextCursor,
-      }));
-    } catch (error) {
-      traceError(error);
-    } finally {
-      set({ messagesLoading: false });
-    }
+    await loadMessagesForRun(
+      runId,
+      runtimeActivationVersion,
+      get().messagesCursor === undefined,
+    );
   },
   async sendMessage(draft) {
     const runId = get().selectedRunId;
@@ -430,9 +592,10 @@ export const useAppStore = create<AppState>((set, get) => {
       draft,
     });
     set((state) => ({
-      planPatches: state.planPatches.map((patch) =>
-        patch.id === applied.id ? applied : patch,
-      ).concat(applied),
+      planPatches: deduplicateByKey(
+        [...state.planPatches, applied],
+        (patch) => patch.id,
+      ),
     }));
     return applied;
   },
@@ -441,8 +604,9 @@ export const useAppStore = create<AppState>((set, get) => {
     if (!runId) throw new Error("No run selected.");
     const applied = await window.spire.runsPlanRollback({ runId, patchId });
     set((state) => ({
-      planPatches: state.planPatches.map((patch) =>
-        patch.id === patchId ? applied : patch,
+      planPatches: deduplicateByKey(
+        [...state.planPatches, applied],
+        (patch) => patch.id,
       ),
     }));
     return applied;
@@ -485,9 +649,37 @@ export const useAppStore = create<AppState>((set, get) => {
     }));
     return models;
   },
+  async changeNodeHarness(nodeId, harnessId) {
+    try {
+      const models = await get().loadHarnessModels(harnessId);
+      const model = models[0];
+      if (!model) {
+        set({ error: `No models are available for ${harnessId}.` });
+        return;
+      }
+      const graph = get().graph;
+      const node = graph?.nodes.find((item) => item.id === nodeId);
+      if (!graph || !node || (node.kind !== "agent" && node.kind !== "decision")) {
+        return;
+      }
+      set({
+        graph: {
+          ...graph,
+          nodes: graph.nodes.map((item) =>
+            item.id === nodeId
+              ? { ...item, harnessId, modelId: model.id }
+              : item,
+          ),
+        },
+        error: undefined,
+      });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+    }
+  },
   addNode(node) {
     const graph = get().graph;
-    if (!graph || !isGraphV2(graph)) return;
+    if (!graph) return;
     set({
       graph: { ...graph, nodes: [...graph.nodes, node] },
       selectedNodeId: node.id,
@@ -495,7 +687,7 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   removeNode(nodeId) {
     const graph = get().graph;
-    if (!graph || !isGraphV2(graph)) return;
+    if (!graph) return;
     set({
       graph: {
         ...graph,
@@ -509,36 +701,36 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   updateNode(nodeId, patch) {
     const graph = get().graph;
-    if (!graph || !isGraphV2(graph)) return;
+    if (!graph) return;
     set({
       graph: {
         ...graph,
         nodes: graph.nodes.map((node) =>
-          node.id === nodeId ? ({ ...node, ...patch } as GraphNode) : node,
+          node.id === nodeId ? updateGraphNode(node, patch) : node,
         ),
       },
     });
   },
   addEdge(edge) {
     const graph = get().graph;
-    if (!graph || !isGraphV2(graph)) return;
+    if (!graph) return;
     set({ graph: { ...graph, edges: [...graph.edges, edge] } });
   },
   removeEdge(edgeId) {
     const graph = get().graph;
-    if (!graph || !isGraphV2(graph)) return;
+    if (!graph) return;
     set({
       graph: { ...graph, edges: graph.edges.filter((edge) => edge.id !== edgeId) },
     });
   },
   addGroup(group) {
     const graph = get().graph;
-    if (!graph || !isGraphV2(graph)) return;
+    if (!graph) return;
     set({ graph: { ...graph, groups: [...graph.groups, group] } });
   },
   removeGroup(groupId) {
     const graph = get().graph;
-    if (!graph || !isGraphV2(graph)) return;
+    if (!graph) return;
     set({
       graph: {
         ...graph,
