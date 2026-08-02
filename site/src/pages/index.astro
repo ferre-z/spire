@@ -1,0 +1,355 @@
+---
+import Base from "../layouts/Base.astro";
+import HeroGraph from "../components/HeroGraph.tsx";
+import Logo from "../components/Logo.astro";
+import "../styles/landing.css";
+
+// ---- data ---------------------------------------------------------------
+const features = [
+  {
+    glyph: "◉",
+    color: "flow",
+    title: "Visual workflow graphs",
+    body: "Assemble bespoke agent tasks into durable, versioned graphs. Compile a graph into a run plan the scheduler can actually execute — and patch safely at checkpoints.",
+  },
+  {
+    glyph: "◆",
+    color: "flow",
+    title: "Bespoke agent nodes",
+    body: "Each node is a job string routed through OpenCode, Codex, or Claude Code. Behavior comes from configuration — job, harness, model, access, and authority — not a title.",
+  },
+  {
+    glyph: "▣",
+    color: "decision",
+    title: "Decisions & routing",
+    body: "Decision nodes pick branches; typed edges carry dependency, hand-off, review, approval, and escalation. Route on success, failure, or an explicit selection.",
+  },
+  {
+    glyph: "▲",
+    color: "gate",
+    title: "Controlled checkpoints",
+    body: "Gates pause for scope validation and workspace merges. Automatic gates validate and merge; manual gates wait until you explicitly resume.",
+  },
+  {
+    glyph: "◈",
+    color: "flow",
+    title: "Isolated git worktrees",
+    body: "Every run gets an isolated worktree. Agents branch into private node worktrees, and Spire never commits, merges, or edits your source checkout.",
+  },
+  {
+    glyph: "✦",
+    color: "decision",
+    title: "MCP control plane",
+    body: "Drive every control capability from any MCP client. State, runs, graphs, plan patches, and live trace events over an authenticated local socket.",
+  },
+];
+
+const flowSteps = [
+  {
+    node: "AGENT",
+    color: "flow",
+    title: "Research",
+    desc: "Starts the run in the integration worktree.",
+  },
+  {
+    node: "AGENT",
+    color: "flow",
+    title: "Implement",
+    desc: "Branches a private node worktree, validates scopes.",
+  },
+  {
+    node: "DECISION",
+    color: "decision",
+    title: "Review",
+    desc: "Routes to gate on approval, or back to revise.",
+  },
+  {
+    node: "GATE",
+    color: "gate",
+    title: "Checkpoint",
+    desc: "Pauses for scope check and workspace merge.",
+  },
+  {
+    node: "AGENT",
+    color: "flow",
+    title: "Deploy",
+    desc: "Settles the terminal node and finalizes the run.",
+  },
+];
+
+const blocks = [
+  { kind: "Agent", color: "flow", desc: "Runs a bespoke job through a configured harness." },
+  { kind: "Decision", color: "decision", desc: "Chooses a branch by selecting an outgoing edge." },
+  { kind: "Checkpoint", color: "gate", desc: "Gates progress: automatic or manual resume." },
+  { kind: "Subgraph", color: "flow", desc: "References another saved graph version." },
+  { kind: "Group", color: "ink", desc: "Visual container that scopes an authority boundary." },
+];
+
+const edges = [
+  { kind: "dependency", when: "activation order" },
+  { kind: "handoff", when: "artifact transfer" },
+  { kind: "review", when: "feedback routing" },
+  { kind: "approval", when: "gate passage" },
+  { kind: "escalation", when: "failure recovery" },
+];
+
+const authorityScopes = ["self", "connected", "group", "graph"];
+const authorityActions = ["retry", "skip", "reorder", "reroute", "pause", "replace", "insert", "remove", "edit"];
+
+const harnesses = [
+  { name: "opencode", tag: "production" },
+  { name: "codex", tag: "production" },
+  { name: "claude-code", tag: "production" },
+  { name: "openrouter", tag: "models" },
+];
+---
+
+<Base
+  title="Visual orchestrator for coding-agent graphs"
+  description="Route OpenCode, Codex, and Claude Code through durable, visual workflow graphs — with isolated git worktrees, Markdown collaboration, and an MCP control plane."
+>
+  <header class="hero">
+    <div class="hero-aura" aria-hidden="true" />
+    <div class="container hero-inner">
+      <div class="hero-copy">
+        <div class="eyebrow"><mark />Spire / coding-agent orchestrator</div>
+
+        <h1 class="hero-title">
+          A command center
+          <br />
+          for your <span class="grad">coding agents</span>
+        </h1>
+
+        <p class="hero-sub">
+          Orchestrate OpenCode, Codex, and Claude Code as visual workflow graphs.
+          Branch, loop, review, and gate — with isolated git worktrees and a
+          control plane you can drive from any MCP client.
+        </p>
+
+        <div class="hero-cta">
+          <a class="btn mono" href="/docs">Get started
+            <span aria-hidden="true">→</span></a>
+          <a class="btn btn-ghost mono" href="#workflow">See the workflow</a>
+        </div>
+
+        <div class="hero-stats mono">
+          <div class="stat"><b>3</b><span>harnesses</span></div>
+          <div class="stat"><b>5</b><span>block kinds</span></div>
+          <div class="stat"><b>5</b><span>edge types</span></div>
+          <div class="stat"><b>30+</b><span>spire_* tools</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="container hero-fig-wrap">
+      <HeroGraph client:load />
+    </div>
+
+    <div class="scroll-cue mono" aria-hidden="true">
+      <span class="scroll-cue-line" />scroll to explore
+    </div>
+  </header>
+
+  <!-- ============ FEATURES ============ -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="head" data-reveal>
+        <span class="eyebrow"><mark /><span class="idx">01</span> why spire</span>
+        <h2>Built for the messy reality of multi-agent work</h2>
+        <p class="lede">
+          Coding agents quit, loop, and stumble. Spire makes those runs durable,
+          auditable, and safe — the graph survives restarts, and nothing touches
+          your working tree.
+        </p>
+      </div>
+
+      <div class="feat-grid">
+        {features.map((f, i) => (
+          <article class="feat-card" data-reveal data-reveal-delay={String(i % 3)}>
+            <span class={`feat-glyph color-${f.color}`}>{f.glyph}</span>
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WORKFLOW ============ -->
+  <section class="section" id="workflow">
+    <div class="container">
+      <div class="head" data-reveal>
+        <span class="eyebrow"><mark /><span class="idx">02</span> the flow</span>
+        <h2>One pipeline, many routes</h2>
+        <p class="lede">
+          A Spire run compiles a saved graph into an execution plan, then the
+          scheduler walks it — activating only the nodes whose activation policy
+          and incoming edges are satisfied.
+        </p>
+      </div>
+
+      <div class="pipeline" data-reveal>
+        {flowSteps.map((s, i) => (
+          <>
+            <div class={`pipe-node color-${s.color}`}>
+              <span class="pipe-kind mono">{s.node}</span>
+              <b class="pipe-title">{s.title}</b>
+              <span class="pipe-body">{s.body}</span>
+            </div>
+            {i < flowSteps.length - 1 && <span class="pipe-edge" aria-hidden="true"><span class="pipe-arrow">↳</span></span>}
+          </>
+        ))}
+      </div>
+
+      <div class="edge-spec" data-reveal>
+        <span class="eyebrow"><mark /> typed edges</span>
+        <div class="edge-grid">
+          {edges.map((e) => (
+            <div class="edge-chip mono">
+              <span class="d" />{e.kind}
+              <span class="edge-when">{e.when}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BLOCKS ============ -->
+  <section class="section" id="blocks">
+    <div class="container">
+      <div class="head" data-reveal>
+        <span class="eyebrow"><mark /><span class="idx">03</span> building blocks</span>
+        <h2>Five block kinds, no rigid roles</h2>
+        <p class="lede">
+          There is no fixed "architect" or "builder". Each node is a bespoke job
+          typed by its configuration, and each edge carries its own semantics.
+        </p>
+      </div>
+
+      <div class="block-grid" data-reveal>
+        {blocks.map((b) => (
+          <div class={`block-card color-${b.color}`}>
+            <span class="block-kind mono">{b.kind}</span>
+            <p>{b.desc}</p>
+          </div>
+        ))}
+      </div>
+
+      <div class="authority" data-reveal>
+        <div class="authority-copy">
+          <span class="eyebrow"><mark /> authority</span>
+          <h3>Every mutation is authorized</h3>
+          <p>
+            Nodes can’t rewrite the plan unless their <span class="mono">NodeAuthority</span> allows it.
+            Scope the mutation — <span class="mono">self</span> · <span class="mono">connected</span> ·{" "}
+            <span class="mono">group</span> · <span class="mono">graph</span> — and pick the actions.
+            Stale or over-scoped proposals are rejected without corrupting the plan.
+          </p>
+          <div class="auth-chips mono">
+            {authorityActions.map((a) => (
+              <span class="edge-chip">{a}</span>
+            ))}
+          </div>
+        </div>
+        <div class="code-panel" aria-hidden="true">
+          <div class="code-head mono"><span class="dot-d" />
+            NodeAuthority.ts
+            <span class="code-tag">TS</span>
+          </div>
+          <pre class="mono"><code>{`type Authority = {
+  scope: "self" | "connected"
+       | "group" | "graph";
+  actions: PlanMutation[]; // subset
+};`}</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MCP ============ -->
+  <section class="section" id="mcp">
+    <div class="container">
+      <div class="head" data-reveal>
+        <span class="eyebrow"><mark /><span class="idx">04</span> control plane</span>
+        <h2>Every control, over MCP</h2>
+        <p class="lede">
+          The whole control plane speaks standard MCP over a local authenticated
+          socket. Zero raw SQL, no shell pass-through, and no keys leave the machine.
+        </p>
+      </div>
+
+      <div class="mcp-grid">
+        <div class="tool-list" data-reveal>
+          <div class="tool-row mono"><span class="t-d" />spire_runs_start <span class="t-w">write</span></div>
+          <div class="tool-row mono"><span class="t-d" />spire_state_get <span class="t-w">read</span></div>
+          <div class="tool-row mono"><span class="t-d" />spire_plan_patch <span class="t-w">write</span></div>
+          <div class="tool-row mono"><span class="t-d" />spire_checkpoint_resume <span class="t-w">write</span></div>
+          <div class="tool-row mono"><span class="t-d" />spire_traces_tail <span class="t-w">live</span></div>
+        </div>
+        <div class="code-panel" data-reveal data-reveal-delay="1">
+          <div class="code-head mono"><span class="dot-flow" /> terminal</div>
+          <pre class="code-pre code-pre--ok"><code>$ node mcp-dist/mcp.js
+◇ spire: connected · socket authenticated
+◇ tailing run spire-7f2 …</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INSTALL ============ -->
+  <section class="section" id="install">
+    <div class="container install-wrap">
+      <div class="install-copy" data-reveal>
+        <span class="eyebrow"><mark /> get started</span>
+        <h2>Install and launch</h2>
+        <p class="lede">
+          Linux-first. Node &gt;= 22, pnpm, and a supported agent CLI is all you need.
+        </p>
+        <div class="hero-cta install-cta">
+          <a class="btn mono" href="/docs#install">Read the manual</a>
+          <a class="btn btn-ghost mono" href="/plugins">Browse plugins</a>
+        </div>
+        <div class="reqs mono">
+          <span class="req">linux · x64 / arm64</span>
+          <span class="req">node ≥ 22</span>
+          <span class="req">pnpm 11</span>
+        </div>
+      </div>
+
+      <div class="code-panel install-panel" data-reveal data-reveal-delay="1">
+        <div class="code-head mono"><span class="dot-flow" /> bash</div>
+        <pre class="code-pre"><code>pnpm install
+pnpm start</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CTA ============ -->
+  <section class="section cta-section">
+    <div class="container cta-card" data-reveal>
+      <div class="cta-aura" aria-hidden="true" />
+      <span class="eyebrow"><mark /> ready when you are</span>
+      <h2>Stop herding agents.<br />Start orchestrating them.</h2>
+      <div class="hero-cta">
+        <a class="btn mono" href="/docs">Get started with Spire →</a>
+        <a class="btn btn-ghost mono" href="/#workflow">Review the workflow</a>
+      </div>
+      <Logo class="cta-mark" aria-hidden="true" />
+    </div>
+  </section>
+</Base>
+
+<script>
+  // thin scroll progress bar at the very top
+  const bar = document.createElement("div");
+  bar.className = "scrollbar";
+  document.body.prepend(bar);
+  const upd8 = () => {
+    const h = document.documentElement;
+    const p = h.scrollTop / (h.scrollHeight - h.clientHeight || 1);
+    bar.style.transform = `scaleX(${Math.min(1, Math.max(0, p))})`;
+  };
+  addEventListener("scroll", upd8, { passive: true });
+  upd8();
+</script>

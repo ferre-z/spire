@@ -1,0 +1,140 @@
+---
+import Logo from "./Logo.astro";
+
+const cols = [
+  {
+    title: "Product",
+    links: [
+      { href: "/#workflow", label: "Workflow" },
+      { href: "/#blocks", label: "Block types" },
+      { href: "/#authority", label: "Authority" },
+      { href: "/docs", label: "Documentation" },
+    ],
+  },
+  {
+    title: "Extensions",
+    links: [
+      { href: "/plugins", label: "Harness plugins" },
+      { href: "/#mcp", label: "MCP control plane" },
+      { href: "/docs#mcpsetup", label: "Client setup" },
+      { href: "/plugins", label: "Backend plugins" },
+    ],
+  },
+  {
+    title: "Project",
+    links: [
+      { href: "/docs#architecture", label: "Architecture" },
+      { href: "/docs#security", label: "Security model" },
+      { href: "/#install", label: "Install" },
+      { href: "https://github.com", label: "GitHub", external: true },
+    ],
+  },
+];
+---
+
+<footer class="footer">
+  <div class="container foot-grid">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Spire home">
+        <Logo />
+        <span class="brand-name">Spire</span>
+      </a>
+      <p class="foot-desc">
+        A Linux-first desktop orchestrator for coding-agent graphs. Visual, durable,
+        and fully controllable.
+      </p>
+      <div class="foot-status mono">
+        <span class="dot"></span>MIT license · v0.1.0
+      </div>
+    </div>
+
+    {cols.map((c) => (
+      <div class="foot-col">
+        <h4 class="mono">{c.title}</h4>
+        <nav>
+          {c.links.map((l) => (
+            <a href={l.href} {...(l.external ? { target: "_blank", rel: "noreferrer" } : {})}>
+              {l.label}
+            </a>
+          ))}
+        </nav>
+      </div>
+    ))}
+  </div>
+  <div class="container foot-bottom">
+    <span class="mono">© 2026 Spire contributors</span>
+    <a class="mono back-top" href="#top">back to top ↑</a>
+  </div>
+</footer>
+
+<style is:global>
+  .footer {
+    margin-top: clamp(40px, 6vw, 90px);
+    border-top: 1px solid var(--line);
+    background: linear-gradient(180deg, transparent, rgba(6, 8, 10, 0.6));
+    padding-block: 64px 28px;
+  }
+  .foot-grid {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(3, 1fr);
+    gap: 40px;
+  }
+  .foot-brand .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .foot-desc {
+    margin-top: 16px;
+    max-width: 320px;
+    color: var(--ink-dim);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .foot-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+  .foot-status .dot {
+    width: 7px; height: 7px; border-radius: 2px;
+    background: var(--flow);
+    box-shadow: 0 0 0 3px var(--flow-soft);
+  }
+  .foot-col h4 {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 16px;
+    font-weight: 600;
+  }
+  .foot-col nav { display: flex; flex-direction: column; gap: 11px; }
+  .foot-col a {
+    color: var(--ink-dim);
+    font-size: 14px;
+    width: max-content;
+    transition: color 0.18s var(--bez-fast);
+  }
+  .foot-col a:hover { color: var(--accent); }
+  .foot-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+  .back-top { color: var(--ink-faint); }
+  .back-top:hover { color: var(--accent); }
+
+  @media (max-width: 760px) {
+    .foot-grid { grid-template-columns: 1fr 1fr; }
+    .foot-brand { grid-column: 1 / -1; }
+  }
+  @media (max-width: 460px) {
+    .foot-grid { grid-template-columns: 1fr; }
+    .foot-bottom { flex-direction: column; gap: 12px; align-items: flex-start; }
+  }
+</style>

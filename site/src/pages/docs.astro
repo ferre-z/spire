@@ -1,0 +1,269 @@
+---
+import Base from "../layouts/Base.astro";
+import "../styles/docs.css";
+
+const sections = [
+  { id: "overview", n: "00", label: "Overview" },
+  { id: "install", n: "01", label: "Install & run" },
+  { id: "workflow-model", n: "02", label: "Workflow model" },
+  { id: "block-types", n: "03", label: "Block types" },
+  { id: "authority", n: "04", label: "Authority & patches" },
+  { id: "harnesses", n: "05", label: "Harnesses" },
+  { id: "architecture", n: "06", label: "Architecture" },
+  { id: "mcp", n: "07", label: "MCP control plane" },
+  { id: "security", n: "08", label: "Security model" },
+  { id: "commands", n: "09", label: "Dev commands" },
+];
+
+const authorityActions = ["retry", "skip", "reorder", "reroute", "pause", "replace", "insert", "remove", "edit"];
+---
+
+<Base
+  title="Documentation"
+  description="Spire documentation: install, workflow model, block types, authority, architecture, and the MCP control plane."
+>
+  <div class="docs-shell container">
+    <!-- sidebar -->
+    <aside class="docs-side">
+      <nav class="docs-nav mono" aria-label="Documentation">
+        <span class="docs-nav-cat mono">manual</span>
+        {sections.map((s) => (
+          <a href={`#${s.id}`} class="docs-link" data-side>
+            <span class="docs-link-idx">{s.n}</span>
+            {s.label}
+          </a>
+        ))}
+      </nav>
+      <div class="docs-progress-meta mono">v0.1.0 · linux-x64/arm64</div>
+    </aside>
+
+    <!-- content -->
+    <div class="docs-body">
+      <span class="eyebrow"><mark /> spire manual</span>
+      <h1 class="docs-title">The Spire manual</h1>
+      <p class="docs-lede">
+        Everything you need to understand how Spire turns coding agents into
+        durable, visual, and controllable workflow graphs.
+      </p>
+
+      <section class="docs-sec" id="overview">
+        <h2><span class="sec-no mono">00</span>Overview</h2>
+        <p>
+          Spire is a <b>Linux-first desktop application</b> for orchestrating coding
+          agents as visual, durable workflow graphs. You build graphs whose nodes are
+          bespoke agent tasks routed through <span class="mono">OpenCode</span>,{" "}
+          <span class="mono">Codex</span>, or <span class="mono">Claude Code</span>.
+          Nodes collaborate through shared Markdown artifacts, execute in isolated Git
+          worktrees, branch and loop, and apply authorized runtime plan changes at
+          checkpoints — all persisted in a local SQLite database and fully controllable
+          through MCP.
+        </p>
+        <pre class="flow-diagram mono"><code>Research → Implement → Review → Gate ──┬── checkpoint → Deploy → Finalize
+                                          │   ↑                  │
+                                          │   └── revise ────────┘
+                                          └── need revisions</code></pre>
+        <p>
+          Every run gets an isolated Git worktree. Spire preserves the graph version,
+          execution plan, node states, collaboration messages, trace journal, and
+          workspace references in a local SQLite database.
+        </p>
+      </section>
+
+      <section  class="docs-sec" id="install">
+        <h2><span class="sec-no mono">01</span>Install &amp; run</h2>
+        <h3>Prerequisites</h3>
+        <ul class="docs-list">
+          <li>Linux x64 or arm64</li>
+          <li>Node.js 22 or newer</li>
+          <li>pnpm 11</li>
+          <li>Git</li>
+          <li>At least one harness CLI: OpenCode ≥ 1.18, Codex, or Claude Code</li>
+        </ul>
+        <p>
+          An <span class="mono">OpenRouter</span> API key is needed only when using
+          OpenRouter-backed models.
+        </p>
+        <h3>Install &amp; launch</h3>
+        <div class="code-panel"><div class="code-head mono"><span class="dot-flow" />bash</div>
+        <pre class="mono code"><code>pnpm install
+pnpm start</code></pre></div>
+        <p>
+          If pnpm asks whether to run build scripts, approve
+          <span class="mono">electron</span>, <span class="mono">esbuild</span>, and{" "}
+          <span class="mono">better-sqlite3</span>. Then select a repository and
+          configure harnesses. Native harness credentials are entered directly in each
+          CLI's own auth flow — Spire never stores them.
+        </p>
+      </section>
+
+      <section  class="docs-sec" id="workflow-model">
+        <h2><span class="sec-no mono">02</span>Workflow model</h2>
+        <h3>Saved graphs versus run plans</h3>
+        <p>
+          <b>Saved graphs</b> (<span class="mono">GraphDefinitionV2</span>) are immutable,
+          versioned templates defining topology, node configs, edges, groups, and
+          subgraphs. <b>Execution plans</b> are compiled from one graph version into a
+          separate, persisted, mutable record. The scheduler changes only the plan — never
+          the source graph — when a node proposes an authorized patch.
+        </p>
+        <h3>Typed edges</h3>
+        <p>
+          Edges carry <span class="mono">kind</span> and <span class="mono">when</span>.
+          A target node becomes ready when its activation policy
+          (<span class="mono">all</span> / <span class="mono">any</span>) and incoming edge
+          conditions are satisfied.
+        </p>
+        <div class="edge-table">
+          <div class="row mono"><span class="k">dependency</span><span class="w">activation order</span></div>
+          <div class="row mono"><span class="k">handoff</span><span class="w">artifact transfer</span></div>
+          <div class="row mono"><span class="k">review</span><span class="w">feedback routing</span></div>
+          <div class="row mono"><span class="k">approval</span><span class="w">gate passage</span></div>
+          <div class="row mono"><span class="k">escalation</span><span class="w">failure recovery</span></div>
+        </div>
+      </section>
+
+      <section  class="docs-sec" id="block-types">
+        <h2><span class="sec-no mono">03</span>Block types</h2>
+        <p>A graph is composed of five block kinds:</p>
+        <div class="doc-cards">
+          <div class="doc-card color-flow"><b class="mono">Agent</b><p>Runs a bespoke job through a configured harness. Has <span class="mono">job</span>, <span class="mono">harnessId</span>, <span class="mono">modelId</span>, <span class="mono">access</span>, <span class="mono">authority</span>, <span class="mono">activation</span>, <span class="mono">maxVisits</span>.</p></div>
+          <div class="doc-card color-decision"><b class="mono">Decision</b><p>Chooses a branch by selecting an outgoing edge. Routes by <span class="mono">selected</span> edges rather than fixed conditions.</p></div>
+          <div class="doc-card color-gate"><b class="mono">Checkpoint</b><p>Gates progress. <span class="mono">automatic</span> pauses for scope validation; <span class="mono">manual</span> pauses until you resume.</p></div>
+          <div class="doc-card color-flow"><b class="mono">Subgraph</b><p>References another saved graph version, resolved at compile time with namespaced nested IDs.</p></div>
+          <div class="doc-card color-ink"><b class="mono">Group</b><p>A visual container for nodes. Purely presentational; it only scopes the <span class="mono">group</span> authority boundary.</p></div>
+        </div>
+      </section>
+
+      <section  class="docs-sec" id="authority">
+        <h2><span class="sec-no mono">04</span>Authority &amp; plan patches</h2>
+        <p>
+          Each agent/decision node declares a <span class="mono">NodeAuthority</span> with
+          a <span class="mono">scope</span> and an <span class="mono">actions</span> list.
+          Defaults are self scope with no actions — a node cannot patch the plan unless
+          authorized.
+        </p>
+        <div class="code-panel"><div class="code-head mono"><span class="dot-d" />types.ts</div>
+<pre class="mono code"><code>type NodeAuthority = &#123;
+  scope: "self" | "connected" | "group" | "graph";
+  actions: PlanMutation[]; // subset of:
+  // retry skip reorder reroute pause replace insert remove edit
+&#125;;</code></pre></div>
+        <p>
+          Patches are only permitted after node completion, at explicit checkpoints, or
+          during failure recovery. The <span class="mono">baseRevision</span> must equal the
+          current plan revision; stale proposals are rejected. Rollback applies the inverse
+          operations as a new audited revision.
+        </p>
+      </section>
+
+      <section  class="docs-sec" id="harnesses">
+        <h2><span class="sec-no mono">05</span>Harnesses</h2>
+        <p>
+          OpenCode, Codex, and Claude Code are the production harnesses for this release.
+          Each implements the normalized <span class="mono">HarnessAdapter</span> contract —
+          <span class="mono">probe</span>, <span class="mono">listModels</span>,{" "}
+          <span class="mono">run</span>, <span class="mono">abort</span>,{" "}
+          <span class="mono">close</span>. Native CLI credentials stay owned by each harness;
+          Spire never stores native harness credentials.
+        </p>
+      </section>
+
+      <section  class="docs-sec" id="architecture">
+        <h2><span class="sec-no mono">06</span>Architecture</h2>
+        <div class="code-panel"><div class="code-head mono"><span class="dot-flow" /> stack</div>
+<pre class="mono code"><code>React renderer
+    │ typed, narrow IPC
+Sandboxed preload
+    │
+Electron main process
+    ├── RunEngine              graph compilation, scheduling, persistence
+    ├── GraphScheduler        ready-node selection, execution, restart recovery
+    ├── HarnessRegistry       OpenCode / Codex / Claude Code adapters
+    ├── NodeWorkspaceCoordinator  git worktrees, scope validation, merges
+    ├── CollaborationWorkspace     Markdown handoffs
+    ├── SpireDatabase         SQLite: graphs, plans, messages, patches
+    ├── TraceJournal          append-only redacted event log
+    ├── ControlSocketServer   authenticated Unix socket control plane
+    └── LocalWorktreeBackend  git worktrees, diff, patch lifecycle</code></pre></div>
+        <p>
+          Orchestration depends on two small seams: <span class="mono">HarnessAdapter</span>{" "}
+          (create/continue/observe/abort agent sessions) and{" "}
+          <span class="mono">ExecutionBackend</span> (prepare/inspect/export/clean run
+          workspaces). This keeps future harnesses and remote HQ runners out of the engine
+          and UI.
+        </p>
+      </section>
+
+      <section  class="docs-sec" id="mcp">
+        <h2><span class="sec-no mono">07</span>MCP control plane</h2>
+        <p>
+          Spire exposes its full control plane to local MCP clients through a stdio
+          sidecar — a plain Node 22+ process (no Electron) that connects to the running app
+          over an authenticated Unix socket. Build it once with{" "}
+          <span class="mono">pnpm build:mcp</span>.
+        </p>
+        <h3>Client setup</h3>
+        <div class="code-panel"><div class="code-head mono"><span class="dot-flow" />codex · config.toml</div>
+<pre class="mono code"><code>[mcp_servers.spire]
+command = "node"
+args = ["/path/to/spire/mcp-dist/mcp.js"]</code></pre></div>
+        <div class="code-panel"><div class="code-head mono"><span class="dot-flow" />claude</div>
+<pre class="mono code"><code>claude mcp add spire -- node /path/to/spire/mcp-dist/mcp.js</code></pre></div>
+        <p>
+          Every control capability maps to exactly one <span class="mono">spire_*</span>{" "}
+          tool — <span class="mono">spire_runs_start</span>,{" "}
+          <span class="mono">spire_state_get</span>, <span class="mono">spire_plan_patch</span>,{" "}
+          <span class="mono">spire_checkpoint_resume</span>,{" "}
+          <span class="mono">spire_traces_tail</span>, and more. Resources mirror the same data
+          (<span class="mono">{'spire://graphs/{id}'}</span>,{" "}
+          <span class="mono">{'spire://runs/{id}'}</span>, …) and live trace events stream as MCP
+          logging notifications.
+        </p>
+      </section>
+
+      <section  class="docs-sec" id="security">
+        <h2><span class="sec-no mono">08</span>Security model</h2>
+        <ul class="docs-list">
+          <li>The sidecar requires the Spire desktop app to be running, or it exits with one actionable error.</li>
+          <li>A per-launch random token is published in <span class="mono">&lt;userData&gt;/control/control.token</span> (mode 0600); the token rotates every launch and is never logged.</li>
+          <li>The socket exposes semantic control operations only, validated by the same Zod schemas as the Electron IPC adapter. No raw SQL, shell, or filesystem pass-through.</li>
+          <li>Execution traces are redacted in the SQLite trace journal before crossing the socket — no unredacted keys, tokens, or credentials in MCP output.</li>
+        </ul>
+      </section>
+
+      <section  class="docs-sec" id="commands">
+        <h2><span class="sec-no mono">09</span>Development commands</h2>
+        <div class="code-panel"><div class="code-head mono"><span class="dot-flow" />bash</div>
+<pre class="mono code"><code>pnpm typecheck    # tsc --noEmit
+pnpm test         # vitest run
+pnpm lint         # eslint .
+pnpm build        # packaged Linux app under out/
+pnpm build:mcp    # self-contained MCP sidecar at mcp-dist/mcp.js
+pnpm make         # Linux ZIP + .deb distributables
+pnpm test:e2e     # Playwright Electron UI suite under Xvfb</code></pre></div>
+      </section>
+    </div>
+  </div>
+</Base>
+
+<script>
+  // highlight the sidebar link of the section currently in view
+  const links = document.querySelectorAll("[data-side]");
+  if ("IntersectionObserver" in window) {
+    const map = new Map();
+    document.querySelectorAll(".docs-sec").forEach((sec) => {
+      map.set("#" + sec.id, sec);
+    });
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            links.forEach((l) => l.classList.toggle("active", l.getAttribute("href") === "#" + e.target.id));
+          }
+        }
+      },
+      { rootMargin: "0px 0px -62% 0px", threshold: 0 }
+    );
+    map.forEach((sec) => io.observe(sec));
+  }
+</script>

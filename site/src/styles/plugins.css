@@ -1,0 +1,202 @@
+/* ============================================================
+   Plugins page styles
+   ============================================================ */
+.plug-hero {
+  padding-top: calc(var(--nav-h) + clamp(56px, 8vw, 100px));
+  text-align: center;
+}
+.plug-hero .eyebrow { justify-content: center; }
+.plug-title {
+  margin-top: 18px;
+  font-size: clamp(36px, 6.6vw, 72px);
+  line-height: 1.03;
+  letter-spacing: -0.03em;
+}
+.plug-lede {
+  margin: 22px auto 0;
+  max-width: 640px;
+  color: var(--ink-dim);
+  font-size: clamp(16px, 1.7vw, 18px);
+  line-height: 1.66;
+}
+.plug-lede .mono { color: var(--ink); }
+
+/* ---- seam diagram ---- */
+.seam-diagram {
+  margin: 52px auto 0;
+  max-width: 860px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+}
+.seam-slot {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+  padding: 22px 20px;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+}
+.seam-slot.accent { border-color: rgba(78, 230, 195, 0.35); }
+.seam-slot.accent::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 2px;
+  background: var(--grad-primary);
+}
+.seam-tag {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.accent .seam-tag { color: var(--flow); }
+.seam-slot b { display: block; margin-top: 10px; font-size: 15px; color: var(--ink); }
+.seam-slot p { margin-top: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-faint); }
+.seam-arrow { color: var(--ink-faint); font-size: 18px; }
+
+/* ---- harness cards ---- */
+.harness-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+.harness-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  padding: 26px 26px 24px;
+  transition: border-color 0.25s var(--bez-fast), transform 0.25s var(--bez-fast);
+}
+.harness-card:hover { transform: translateY(-3px); border-color: var(--line-strong); }
+.harness-top { display: flex; align-items: center; gap: 16px; }
+.harness-icon {
+  display: inline-flex;
+  width: 42px; height: 42px;
+  align-items: center; justify-content: center;
+  border-radius: 11px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--flow);
+  font-size: 18px;
+}
+.harness-top h3 { font-size: 19px; }
+.harness-tag {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 7px;
+  display: inline-block;
+  margin-top: 3px;
+}
+.harness-status {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--flow);
+  white-space: nowrap;
+}
+.harness-status::before { content: "● "; }
+.harness-desc { margin-top: 16px; color: var(--ink-dim); font-size: 14px; line-height: 1.62; }
+.harness-models {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.harness-models .h-label {
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+  margin-right: 10px;
+}
+
+/* ---- contract table ---- */
+.contract {
+  margin-top: 56px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--bg-1), var(--bg-0));
+  padding: clamp(28px, 4vw, 48px);
+}
+.contract-copy h3 { margin-top: 12px; font-size: clamp(22px, 2.6vw, 30px); }
+.contract-table { margin-top: 26px; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.contract-table .row {
+  display: grid;
+  grid-template-columns: 120px 90px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.contract-table .row:last-child { border-bottom: 0; }
+.contract-table .m { color: var(--ink); font-size: 13px; }
+.contract-table .m::before { content: "· "; color: var(--flow); }
+.contract-table .cat {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+.contract-table .def { color: var(--ink-dim); font-size: 13.5px; line-height: 1.5; }
+
+/* ---- ext cards ---- */
+.ext-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.ext-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  padding: 26px;
+  color: inherit;
+  transition: border-color 0.25s var(--bez-fast), transform 0.25s var(--bez-fast);
+}
+.ext-card:hover { transform: translateY(-3px); border-color: var(--line-strong); }
+.ext-glyph {
+  display: inline-flex;
+  width: 40px; height: 40px;
+  align-items: center; justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  font-size: 17px;
+  color: var(--cs, var(--flow));
+  background: var(--bg-2);
+}
+.ext-card h3 { margin-top: 18px; font-size: 17px; }
+.ext-card p { margin-top: 10px; color: var(--ink-dim); font-size: 13.5px; line-height: 1.6; }
+.ext-cta { margin-top: auto; padding-top: 18px; font-size: 12px; color: var(--cs, var(--flow)); }
+.color-ext-ts { --cs: var(--flow); }
+.color-ext-ts2 { --cs: var(--decision); }
+.color-ext-mcp { --cs: var(--gate); }
+
+.cta-section { padding-top: 24px; }
+.cta-section .cta-card {
+  text-align: center;
+  padding: clamp(60px, 8vw, 96px) 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(160deg, var(--bg-2), var(--bg-0));
+}
+.cta-section .cta-card.h2, .cta-card h2 { margin: 20px auto 0; font-size: clamp(32px, 5vw, 52px); }
+.cta-section .eyebrow { display: flex; justify-content: center; }
+.cta-section .hero-cta { display: flex; justify-content: center; gap: 12px; margin-top: 34px; flex-wrap: wrap; }
+
+@media (max-width: 900px) {
+  .seam-diagram { grid-template-columns: 1fr; gap: 10px; }
+  .seam-arrow { transform: rotate(90deg); justify-self: center; }
+  .harness-grid { grid-template-columns: 1fr; }
+  .ext-grid { grid-template-columns: 1fr; }
+  .contract-table .row { grid-template-columns: 1fr 1fr; }
+  .contract-table .def { grid-column: 1 / -1; }
+}

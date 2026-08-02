@@ -1,0 +1,183 @@
+---
+import Base from "../layouts/Base.astro";
+import "../styles/plugins.css";
+
+const harnesses = [
+  {
+    name: "OpenCode",
+    id: "opencode",
+    tag: "production",
+    status: "probe: ok",
+    desc: "The default harness. Route agent nodes through the OpenCode CLI with full model, access, and authority control.",
+    models: "gpt-5 · claude · gemini + OpenRouter",
+  },
+  {
+    name: "Codex",
+    id: "codex",
+    tag: "production",
+    status: "probe: ok",
+    desc: "Drive OpenAI's Codex agent from your Spire graphs, with the same normalized probe, run, and abort contract.",
+    models: "o-series · codex-mini",
+  },
+  {
+    name: "Claude Code",
+    id: "claude",
+    tag: "production",
+    status: "probe: ok",
+    desc: "Route nodes through Claude Code. Native credentials stay owned by the CLI — Spire never stores them.",
+    models: "opus · sonnet · haiku",
+  },
+  {
+    name: "OpenRouter",
+    id: "openrouter",
+    tag: "models",
+    status: "optional",
+    desc: "Expose any OpenRouter-backed model to your graphs when you need a model beyond the native CLIs.",
+    models: "100+ routed models",
+  },
+];
+
+const seams = [
+  ["probe", "boot", "Detect the CLI and report its health & version."],
+  ["listModels", "models", "Enumerate the models a harness can run."],
+  ["run", "exec", "Create, continue, and observe an agent session."],
+  ["abort", "exec", "Halt a running node attempt."],
+  ["close", "cleanup", "Release the harness and its resources."],
+];
+
+const extensible = [
+  {
+    title: "Build a custom harness",
+    body: "Implement the HarnessAdapter contract and register it. The registry discovers harnesses, probes status, and routes nodes through your adapter.",
+    cta: "Implement HarnessAdapter",
+    method: "ts",
+  },
+  {
+    title: "Extend an ExecutionBackend",
+    body: "Swap how run workspaces are prepared, inspected, exported, and cleaned — keep future remote HQ runners out of the graph engine.",
+    cta: "Extend ExecutionBackend",
+    method: "ts",
+  },
+  {
+    title: "Drive the control plane",
+    body: "Every control capability is an MCP tool over a local socket. Build clients that start runs, patch plans, and tail live traces.",
+    cta: "See the MCP docs",
+    href: "/docs#mcp",
+    method: "mcp",
+  },
+];
+---
+
+<Base
+  title="Plugins & harnesses"
+  description="Spire's plugin surface: the HarnessAdapter and ExecutionBackend seams, production harnesses, and the MCP control plane."
+>
+  <section class="plug-hero section">
+    <div class="container plug-hero-in">
+      <div class="eyebrow"><mark /> extensibility</div>
+      <h1 class="plug-title">A plugin surface,<br />not a locked box</h1>
+      <p class="plug-lede">
+        Spire is opinionated about orchestration, but deliberately small at two seams —
+        <span class="mono">HarnessAdapter</span> and <span class="mono">ExecutionBackend</span> —
+        so new harnesses and future runners never leak into the engine or the UI.
+      </p>
+
+      <div class="seam-diagram" data-reveal>
+        <div class="seam-slot">
+          <span class="seam-tag mono">interface</span>
+          <b class="mono">HarnessAdapter</b>
+          <p>create · continue · observe · abort agent sessions</p>
+        </div>
+        <span class="seam-arrow mono">⇄</span>
+        <div class="seam-slot accent">
+          <span class="seam-tag mono">graph engine</span>
+          <b class="mono">Spire Scheduler</b>
+          <p>compiles · plans · persists · recovers</p>
+        </div>
+        <span class="seam-arrow mono">⇄</span>
+        <div class="seam-slot">
+          <span class="seam-tag mono">interface</span>
+          <b class="mono">ExecutionBackend</b>
+          <p>prepare · inspect · export · clean workspaces</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- harnesses -->
+  <section class="section" id="harnesses">
+    <div class="container head">
+      <span class="eyebrow" data-reveal><mark /><span class="idx">01</span> harnesses</span>
+      <h2 data-reveal>Production harnesses, one contract</h2>
+      <p class="lede" data-reveal>
+        Each harness implements the same normalized adapter. Native CLI authentication
+        stays owned by each harness — Spire never stores native credentials.
+      </p>
+    </div>
+
+    <div class="container harness-grid">
+      {harnesses.map((h, i) => (
+        <article class="harness-card" data-reveal data-reveal-delay={String(i % 3)}>
+          <div class="harness-top">
+            <span class="harness-icon mono"></span>
+            <div>
+              <h3>{h.name}</h3>
+              <span class="harness-tag mono">{h.tag}</span>
+            </div>
+            <span class="harness-status mono">{h.status}</span>
+          </div>
+          <p class="harness-desc">{h.desc}</p>
+          <div class="harness-models mono">
+            <span class="h-label">models</span>
+            {h.models}
+          </div>
+        </article>
+      ))}
+    </div>
+
+    <div class="container contract" data-reveal>
+      <div class="contract-copy">
+        <span class="eyebrow"><mark /> HarnessAdapter</span>
+        <h3>One contract, five behaviors</h3>
+      </div>
+      <div class="contract-table">
+        {seams.map(([m, cat, def]) => (
+          <div class="row">
+            <span class="m mono">{m}</span>
+            <span class="cat mono">{cat}</span>
+            <span class="def">{def}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- extensible -->
+  <section class="section" id="extend">
+    <div class="container head">
+      <span class="eyebrow" data-reveal><mark /><span class="idx">02</span> extend</span>
+      <h2 data-reveal>Three ways to extend Spire</h2>
+    </div>
+    <div class="container ext-grid">
+      {extensible.map((x, i) => (
+        <a class="ext-card" data-reveal data-reveal-delay={String(i % 3)} href={x.cta === "See the MCP docs" ? "/docs#mcp" : "#"}>
+          <span class={`ext-glyph mono color-ext-${x.method}`}>{["◈", "▤", "✦"][i]}</span>
+          <h3>{x.title}</h3>
+          <p>{x.body}</p>
+          <span class="ext-cta mono">{x.cta} →</span>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="section cta-section">
+    <div class="container cta-card" data-reveal>
+      <span class="eyebrow"><mark /> open by design</span>
+      <h2>Bring your own harness.</h2>
+      <div class="hero-cta">
+        <a class="btn mono" href="/docs#harnesses">Read the docs</a>
+        <a class="btn btn-ghost mono" href="/#install">Install Spire</a>
+      </div>
+    </div>
+  </section>
+</Base>

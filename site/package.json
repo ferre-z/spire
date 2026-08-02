@@ -1,0 +1,32 @@
+{
+  "name": "spire-site",
+  "productName": "Spire",
+  "version": "0.1.0",
+  "description": "Official website for Spire — a visual desktop orchestrator for coding-agent graphs.",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/react": "^4.2.0",
+    "@fontsource-variable/inter": "^5",
+    "@fontsource-variable/jetbrains-mono": "^5",
+    "astro": "^5.7.0",
+    "gsap": "^3.13.0",
+    "lucide-astro": "^0.545.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
