@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   Bot,
@@ -12,6 +12,7 @@ import {
   ScrollText,
 } from "lucide-react";
 import { useAppStore } from "../store";
+import { useDialogFocus } from "./useDialogFocus";
 import {
   type DrawerDestination,
   type NavigationDestination,
@@ -61,10 +62,13 @@ function CommandMenuDialog() {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  const { disableFocusRestore } = useDialogFocus({
+    containerRef: dialogRef,
+    initialFocusRef: inputRef,
+    onClose: close,
+  });
 
   const items = useMemo<readonly CommandItem[]>(() => {
     const destinations = NAVIGATION_COMMANDS.map((command) => ({
@@ -111,6 +115,7 @@ function CommandMenuDialog() {
 
   function execute(item: CommandItem | undefined): void {
     if (!item) return;
+    disableFocusRestore();
     setOpen(false);
     item.run();
   }
@@ -122,7 +127,14 @@ function CommandMenuDialog() {
         if (event.target === event.currentTarget) setOpen(false);
       }}
     >
-      <div className="command-menu" role="dialog" aria-modal="true" aria-label="Spire commands">
+      <div
+        ref={dialogRef}
+        className="command-menu"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Spire commands"
+        tabIndex={-1}
+      >
         <div className="command-menu-input">
           <Search size={15} />
           <input

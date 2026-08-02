@@ -26,6 +26,8 @@ This contract covers onboarding, the fixed workspace shell, reusable controls, o
 
 Tinted semantic surfaces are mixed from the relevant accent with a charcoal surface; they never emit glow or bloom.
 
+Active renderer CSS consumes semantic aliases for interactive borders, selected surfaces, execution button states, status borders/text, scrims, and neutral shadows. Component rules do not introduce raw color literals outside the root token block. Layout geometry, spacing, and typography use named scale and shell-dimension tokens whenever values repeat across primitives or breakpoints.
+
 ### Typography
 
 Inter Variable is the interface face. JetBrains Mono Variable is reserved for identifiers, status metadata, key hints, and output. Body copy is 13px/1.45; labels are 11px/1.2 with modest tracking; pane headings are 14px/1.3; onboarding headings use a restrained responsive 28–36px scale.

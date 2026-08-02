@@ -128,6 +128,48 @@ describe("WorkspaceShell", () => {
     expect(document.body.textContent).toContain("Diff output");
   });
 
+  it("marks only the current activity destination", async () => {
+    await renderShell();
+    const graphLibrary = document.querySelector<HTMLButtonElement>(
+      "[aria-label='Graph Library']",
+    );
+    const runHistory = document.querySelector<HTMLButtonElement>(
+      "[aria-label='Run History']",
+    );
+    expect(graphLibrary?.getAttribute("aria-current")).toBe("page");
+    expect(runHistory?.hasAttribute("aria-current")).toBe(false);
+
+    await act(async () => runHistory?.click());
+    expect(graphLibrary?.hasAttribute("aria-current")).toBe(false);
+    expect(runHistory?.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("traps focus in the drawer and restores its rail opener", async () => {
+    await renderShell();
+    const opener = document.querySelector<HTMLButtonElement>("[aria-label='Diff']");
+    opener?.focus();
+    await act(async () => opener?.click());
+    const dialog = document.querySelector<HTMLElement>(
+      "[role='dialog'][aria-label='Diff']",
+    );
+    const focusable = [...(dialog?.querySelectorAll<HTMLElement>("button") ?? [])];
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    expect(document.activeElement).toBe(first);
+
+    last?.focus();
+    await act(async () => {
+      last?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(first);
+
+    await act(async () => {
+      first?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.querySelector("[role='dialog'][aria-label='Diff']")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
   it("opens command menu with destination, launch, save, and output commands", async () => {
     await renderShell();
     await act(async () => {
@@ -138,6 +180,40 @@ describe("WorkspaceShell", () => {
     expect(dialog?.textContent).toContain("Focus launch goal");
     expect(dialog?.textContent).toContain("Save graph version");
     expect(dialog?.textContent).toContain("Open Live Stream");
+  });
+
+  it("traps command focus and restores the focused opener on Escape", async () => {
+    await renderShell();
+    const opener = document.querySelector<HTMLButtonElement>(
+      "[aria-label='Graph Library']",
+    );
+    opener?.focus();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    });
+    const dialog = document.querySelector<HTMLElement>(
+      "[role='dialog'][aria-label='Spire commands']",
+    );
+    const input = dialog?.querySelector<HTMLInputElement>("input");
+    const focusable = [
+      ...(dialog?.querySelectorAll<HTMLElement>("input, button") ?? []),
+    ];
+    const last = focusable.at(-1);
+    expect(document.activeElement).toBe(input);
+
+    input?.focus();
+    await act(async () => {
+      input?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+      );
+    });
+    expect(document.activeElement).toBe(last);
+
+    await act(async () => {
+      last?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.querySelector("[aria-label='Spire commands']")).toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 
   it("cycles major regions with F6 and Shift+F6", async () => {

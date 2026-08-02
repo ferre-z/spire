@@ -22,7 +22,7 @@ export function TaskLauncherPane() {
   }
 
   async function start() {
-    if (!goal.trim() || !repositoryPath) return;
+    if (!graph || !goal.trim() || !repositoryPath) return;
     setBusy(true);
     setError(undefined);
     try {

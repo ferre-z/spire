@@ -1,12 +1,15 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib";
+import { useDialogFocus } from "../workspace/useDialogFocus";
 
 type IconButtonProps = {
   readonly label: string;
   readonly children: ReactNode;
   readonly onClick: () => void;
   readonly active?: boolean;
+  readonly pressed?: boolean;
+  readonly ariaCurrent?: "page";
   readonly disabled?: boolean;
   readonly type?: "button" | "submit";
   readonly className?: string;
@@ -17,6 +20,8 @@ export function IconButton({
   children,
   onClick,
   active = false,
+  pressed,
+  ariaCurrent,
   disabled = false,
   type = "button",
   className,
@@ -26,7 +31,8 @@ export function IconButton({
       type={type}
       className={cn("ui-icon-button", active && "is-active", className)}
       aria-label={label}
-      aria-pressed={active}
+      aria-pressed={pressed}
+      aria-current={ariaCurrent}
       title={label}
       disabled={disabled}
       onClick={onClick}
@@ -44,7 +50,7 @@ type RailItemProps = IconButtonProps & {
 export function RailItem({ current = false, text, ...props }: RailItemProps) {
   return (
     <div className="ui-rail-item">
-      <IconButton {...props} active={current} />
+      <IconButton {...props} active={current} ariaCurrent={current ? "page" : undefined} />
       {text && <span aria-hidden="true">{text}</span>}
     </div>
   );
@@ -156,6 +162,26 @@ export function Drawer({
 }) {
   if (!open) return null;
   return (
+    <DrawerDialog title={title} onClose={onClose} controls={controls}>
+      {children}
+    </DrawerDialog>
+  );
+}
+
+function DrawerDialog({
+  title,
+  onClose,
+  controls,
+  children,
+}: {
+  readonly title: string;
+  readonly onClose: () => void;
+  readonly controls?: ReactNode;
+  readonly children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocus({ containerRef: dialogRef, onClose });
+  return (
     <div className="ui-drawer-layer">
       <button
         type="button"
@@ -163,7 +189,14 @@ export function Drawer({
         aria-label={`Dismiss ${title} drawer`}
         onClick={onClose}
       />
-      <aside className="ui-drawer" role="dialog" aria-modal="true" aria-label={title}>
+      <aside
+        ref={dialogRef}
+        className="ui-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+      >
         <header className="ui-drawer-header">
           <div>
             <span>OUTPUT</span>
