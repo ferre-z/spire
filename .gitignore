@@ -10,3 +10,4 @@ test-results/
 *.sqlite-wal
 *.log
 .worktrees/
+/main.js
