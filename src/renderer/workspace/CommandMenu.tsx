@@ -1,42 +1,63 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  ArrowDownToLine,
-  ArrowLeftToLine,
-  ArrowRightToLine,
-  ArrowUpToLine,
-  ExternalLink,
-  LayoutGrid,
-  Maximize2,
-  PictureInPicture2,
+  Activity,
+  Bot,
+  GitBranch,
+  History,
+  Library,
+  MessageSquare,
+  Play,
+  Save,
   Search,
-  ZoomIn,
-  ZoomOut,
+  ScrollText,
 } from "lucide-react";
-import { PANE_META } from "./paneIds";
-import { useLayoutStore, type LayoutCommandId } from "./layoutStore";
+import { useAppStore } from "../store";
+import {
+  type DrawerDestination,
+  type NavigationDestination,
+  useWorkspaceUiStore,
+} from "./workspaceUiStore";
 
 type CommandItem = {
-  id: string;
-  label: string;
-  hint?: string;
-  icon: React.ReactNode;
-  run: () => void;
+  readonly id: string;
+  readonly label: string;
+  readonly hint: string;
+  readonly icon: ReactNode;
+  readonly run: () => void;
 };
 
+const NAVIGATION_COMMANDS: readonly {
+  readonly id: NavigationDestination;
+  readonly label: string;
+  readonly icon: ReactNode;
+}[] = [
+  { id: "graph-library", label: "Graph Library", icon: <Library size={15} /> },
+  { id: "run-history", label: "Run History", icon: <History size={15} /> },
+  { id: "harnesses", label: "Harnesses", icon: <Bot size={15} /> },
+  { id: "collaboration", label: "Collaboration", icon: <MessageSquare size={15} /> },
+] as const;
+
+const DRAWER_COMMANDS: readonly {
+  readonly id: DrawerDestination;
+  readonly label: string;
+  readonly icon: ReactNode;
+}[] = [
+  { id: "live-stream", label: "Live Stream", icon: <Activity size={15} /> },
+  { id: "diff", label: "Diff", icon: <GitBranch size={15} /> },
+  { id: "result", label: "Result", icon: <ScrollText size={15} /> },
+] as const;
+
 export function CommandMenu() {
-  const open = useLayoutStore((state) => state.commandMenuOpen);
+  const open = useWorkspaceUiStore((state) => state.commandMenuOpen);
   if (!open) return null;
   return <CommandMenuDialog />;
 }
 
 function CommandMenuDialog() {
-  const setOpen = useLayoutStore((state) => state.setCommandMenuOpen);
-  const closedPanes = useLayoutStore((state) => state.closedPanes);
-  const hasActivePane = useLayoutStore((state) => state.hasActivePane);
-  const hasPopouts = useLayoutStore((state) => state.hasPopouts);
-  const isMaximized = useLayoutStore((state) => state.isMaximized);
-  const reopenPane = useLayoutStore((state) => state.reopenPane);
-  const runCommand = useLayoutStore((state) => state.runCommand);
+  const setOpen = useWorkspaceUiStore((state) => state.setCommandMenuOpen);
+  const openNavigation = useWorkspaceUiStore((state) => state.openNavigation);
+  const openDrawer = useWorkspaceUiStore((state) => state.openDrawer);
+  const saveCurrentGraph = useAppStore((state) => state.saveCurrentGraph);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -45,78 +66,50 @@ function CommandMenuDialog() {
     inputRef.current?.focus();
   }, []);
 
-  const items = useMemo<CommandItem[]>(() => {
-    const list: CommandItem[] = [];
-    for (const pane of closedPanes) {
-      list.push({
-        id: `reopen-${pane}`,
-        label: `Reopen ${PANE_META[pane].title}`,
-        hint: "pane",
-        icon: <LayoutGrid size={15} />,
-        run: () => reopenPane(pane),
-      });
-    }
-    if (hasActivePane) {
-      const moves: Array<[LayoutCommandId, string, React.ReactNode]> = [
-        ["move-left", "Move active pane left", <ArrowLeftToLine size={15} />],
-        ["move-right", "Move active pane right", <ArrowRightToLine size={15} />],
-        ["move-up", "Move active pane up", <ArrowUpToLine size={15} />],
-        ["move-down", "Move active pane down", <ArrowDownToLine size={15} />],
-        ["grow", "Resize active pane larger", <ZoomIn size={15} />],
-        ["shrink", "Resize active pane smaller", <ZoomOut size={15} />],
-      ];
-      for (const [command, label, icon] of moves) {
-        list.push({
-          id: command,
-          label,
-          hint: "layout",
-          icon,
-          run: () => runCommand(command),
-        });
-      }
-      list.push({
-        id: "popout-active",
-        label: "Pop out active pane",
-        hint: "window",
-        icon: <PictureInPicture2 size={15} />,
-        run: () => runCommand("popout-active"),
-      });
-      list.push({
-        id: "maximize-active",
-        label: isMaximized ? "Restore active pane" : "Maximize active pane",
-        hint: "layout",
-        icon: <Maximize2 size={15} />,
-        run: () => runCommand("maximize-active"),
-      });
-    }
-    if (hasPopouts) {
-      list.push({
-        id: "dock-all",
-        label: "Dock all popouts back",
-        hint: "window",
-        icon: <ExternalLink size={15} />,
-        run: () => runCommand("dock-all"),
-      });
-    }
-    list.push({
-      id: "reset-layout",
-      label: "Reset layout to defaults",
-      hint: "layout",
-      icon: <LayoutGrid size={15} />,
-      run: () => runCommand("reset-layout"),
-    });
-    return list;
-  }, [closedPanes, hasActivePane, hasPopouts, isMaximized, reopenPane, runCommand]);
+  const items = useMemo<readonly CommandItem[]>(() => {
+    const destinations = NAVIGATION_COMMANDS.map((command) => ({
+      id: `navigation-${command.id}`,
+      label: `Open ${command.label}`,
+      hint: "navigation",
+      icon: command.icon,
+      run: () => openNavigation(command.id),
+    }));
+    const drawers = DRAWER_COMMANDS.map((command) => ({
+      id: `drawer-${command.id}`,
+      label: `Open ${command.label}`,
+      hint: "output",
+      icon: command.icon,
+      run: () => openDrawer(command.id),
+    }));
+    return [
+      ...destinations,
+      {
+        id: "focus-launch",
+        label: "Focus launch goal",
+        hint: "launch",
+        icon: <Play size={15} />,
+        run: () => document.querySelector<HTMLInputElement>("[aria-label='Launch goal']")?.focus(),
+      },
+      {
+        id: "save-version",
+        label: "Save graph version",
+        hint: "graph",
+        icon: <Save size={15} />,
+        run: () => void saveCurrentGraph(),
+      },
+      ...drawers,
+    ];
+  }, [openDrawer, openNavigation, saveCurrentGraph]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return items;
-    return items.filter((item) => item.label.toLowerCase().includes(needle));
+    return needle
+      ? items.filter((item) => item.label.toLowerCase().includes(needle))
+      : items;
   }, [items, query]);
-
   const activeIndex = Math.min(index, Math.max(filtered.length - 1, 0));
 
-  function execute(item: CommandItem | undefined) {
+  function execute(item: CommandItem | undefined): void {
     if (!item) return;
     setOpen(false);
     item.run();
@@ -129,13 +122,14 @@ function CommandMenuDialog() {
         if (event.target === event.currentTarget) setOpen(false);
       }}
     >
-      <div className="command-menu glass" role="dialog" aria-label="Layout commands">
+      <div className="command-menu" role="dialog" aria-modal="true" aria-label="Spire commands">
         <div className="command-menu-input">
           <Search size={15} />
           <input
             ref={inputRef}
             value={query}
-            placeholder="Layout command…"
+            aria-label="Filter commands"
+            placeholder="Type a command…"
             onChange={(event) => {
               setQuery(event.target.value);
               setIndex(0);
@@ -158,22 +152,23 @@ function CommandMenuDialog() {
           />
           <kbd>esc</kbd>
         </div>
-        <div className="command-menu-list" role="listbox">
+        <div className="command-menu-list" role="listbox" aria-label="Commands">
           {filtered.length === 0 ? (
             <div className="command-menu-empty">No matching commands.</div>
           ) : (
             filtered.map((item, position) => (
               <button
+                type="button"
                 key={item.id}
                 role="option"
                 aria-selected={position === activeIndex}
-                className={`command-menu-item ${position === activeIndex ? "active" : ""}`}
+                className={position === activeIndex ? "is-active" : undefined}
                 onMouseEnter={() => setIndex(position)}
                 onClick={() => execute(item)}
               >
                 {item.icon}
                 <span>{item.label}</span>
-                {item.hint && <small>{item.hint}</small>}
+                <small>{item.hint}</small>
               </button>
             ))
           )}

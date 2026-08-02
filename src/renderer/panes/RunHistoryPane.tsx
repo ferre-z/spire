@@ -4,9 +4,11 @@ import { useAppStore } from "../store";
 import { StatusPill } from "../components/StatusPill";
 
 export function RunHistoryPane() {
-  const snapshot = useAppStore((state) => state.snapshot)!;
+  const snapshot = useAppStore((state) => state.snapshot);
   const selectedRunId = useAppStore((state) => state.selectedRunId);
-  const selectRun = useAppStore((state) => state.selectRun);
+  const activateRun = useAppStore((state) => state.activateRun);
+
+  if (!snapshot) return null;
 
   return (
     <div className="pane pane-scroll" data-pane="run-history">
@@ -21,7 +23,7 @@ export function RunHistoryPane() {
           <button
             key={run.id}
             className={`run-list-item ${run.id === selectedRunId ? "selected" : ""}`}
-            onClick={() => selectRun(run.id)}
+            onClick={() => void activateRun(run.id)}
           >
             <StatusPill status={run.status} compact />
             <span>

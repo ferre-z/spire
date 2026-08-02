@@ -2,8 +2,8 @@ import { FolderGit2, LoaderCircle, Play, Sparkles } from "lucide-react";
 import { useAppStore } from "../store";
 
 export function TaskLauncherPane() {
-  const graph = useAppStore((state) => state.graph)!;
-  const snapshot = useAppStore((state) => state.snapshot)!;
+  const graph = useAppStore((state) => state.graph);
+  const snapshot = useAppStore((state) => state.snapshot);
   const repositoryPath = useAppStore((state) => state.repositoryPath);
   const goal = useAppStore((state) => state.goal);
   const busy = useAppStore((state) => state.busy);
@@ -12,6 +12,8 @@ export function TaskLauncherPane() {
   const setBusy = useAppStore((state) => state.setBusy);
   const setError = useAppStore((state) => state.setError);
   const applySnapshot = useAppStore((state) => state.applySnapshot);
+  if (!graph || !snapshot) return null;
+
   const active = Boolean(snapshot.activeRunId);
 
   async function chooseRepository() {
@@ -51,6 +53,7 @@ export function TaskLauncherPane() {
       <div className="goal-field">
         <Sparkles size={16} />
         <input
+          aria-label="Launch goal"
           value={goal}
           onChange={(event) => setGoal(event.target.value)}
           onKeyDown={(event) => {
@@ -64,7 +67,7 @@ export function TaskLauncherPane() {
         <span>⌘↵</span>
       </div>
       <button
-        className="primary-button run-button liquid-border"
+        className="primary-button run-button"
         disabled={busy || active || !goal.trim() || !repositoryPath}
         onClick={() => void start()}
       >
