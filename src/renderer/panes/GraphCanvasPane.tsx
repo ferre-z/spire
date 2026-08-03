@@ -3,7 +3,6 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  MarkerType,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
@@ -12,16 +11,10 @@ import {
   useReactFlow,
   type Edge,
   type EdgeTypes,
-  type Node,
   type NodeTypes,
   type OnNodeDrag,
 } from "@xyflow/react";
-import type {
-  GraphDefinitionV2,
-  GraphGroup,
-  GraphNode,
-} from "../../shared/domain";
-import type { ExecutionPlan, NodeExecution } from "../../shared/execution";
+import type { GraphDefinitionV2 } from "../../shared/domain";
 import {
   V2AgentNode,
   V2CheckpointNode,
@@ -29,8 +22,15 @@ import {
   V2GroupNode,
   V2SubgraphNode,
 } from "../components/AgentNode";
+import { CanvasEdgeRenderer } from "../components/CanvasEdge";
 import { useAppStore } from "../store";
 import { GraphCanvasPalette } from "./GraphCanvasPalette";
+import { absoluteGraphPosition } from "./GraphCanvasLayout";
+import {
+  buildCanvasEdges,
+  buildCanvasNodes,
+  type CanvasFlowNode,
+} from "./GraphCanvasModel";
 
 export {
   PALETTE_ITEMS,
@@ -38,11 +38,8 @@ export {
   type DefaultRuntimeResult,
   type PaletteItem,
 } from "./GraphCanvasPalette";
+export { buildCanvasEdges, buildCanvasNodes } from "./GraphCanvasModel";
 
-const EDGE_IDLE = "var(--canvas-edge-idle)";
-const EDGE_EXECUTING = "var(--accent-execution)";
-const LABEL_IDLE = "var(--text-3)";
-const LABEL_EXECUTING = "var(--accent-execution)";
 const NODE_TYPES = {
   agent: V2AgentNode,
   decision: V2DecisionNode,
@@ -51,103 +48,7 @@ const NODE_TYPES = {
   group: V2GroupNode,
 } satisfies NodeTypes;
 
-const EDGE_TYPES = {} satisfies EdgeTypes;
-
-type CanvasNodeData = {
-  readonly node?: GraphNode;
-  readonly execution?: NodeExecution;
-  readonly active?: boolean;
-  readonly group?: GraphGroup;
-  readonly childCount?: number;
-  readonly collapsed?: boolean;
-};
-
-type CanvasFlowNode = Node<CanvasNodeData> & {
-  readonly collapsed?: boolean;
-};
-
-export function buildCanvasNodes(
-  graph: GraphDefinitionV2,
-  plan?: ExecutionPlan,
-  collapsedGroups: readonly string[] = [],
-): CanvasFlowNode[] {
-  const executionByNodeId = new Map(
-    (plan?.nodes ?? []).map((execution) => [execution.nodeId, execution]),
-  );
-  const nodes: CanvasFlowNode[] = graph.groups.map((group) => {
-    const collapsed = collapsedGroups.includes(group.id);
-    return {
-      id: `group__${group.id}`,
-      type: "group",
-      position: { x: 0, y: 0 },
-      extent: "parent",
-      data: {
-        group,
-        childCount: graph.nodes.filter((node) => node.groupId === group.id).length,
-        collapsed,
-      },
-      collapsed,
-    };
-  });
-
-  for (const node of graph.nodes) {
-    const execution = executionByNodeId.get(node.id);
-    nodes.push({
-      id: node.id,
-      type: node.kind,
-      position: node.position,
-      parentId: node.groupId ? `group__${node.groupId}` : undefined,
-      data: {
-        node,
-        execution,
-        active: execution?.status === "running",
-      },
-    });
-  }
-  return nodes;
-}
-
-export function buildCanvasEdges(
-  graph: GraphDefinitionV2,
-  plan?: ExecutionPlan,
-): Edge[] {
-  const executionByNodeId = new Map(
-    (plan?.nodes ?? []).map((execution) => [execution.nodeId, execution]),
-  );
-  return graph.edges.map((edge) => {
-    const executing =
-      executionByNodeId.get(edge.source)?.status === "running" ||
-      executionByNodeId.get(edge.target)?.status === "running";
-    const color = executing ? EDGE_EXECUTING : EDGE_IDLE;
-    return {
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      label: edge.label,
-      data: { kind: edge.kind, when: edge.when, label: edge.label },
-      type: "smoothstep",
-      className: executing ? "canvas-edge is-executing" : "canvas-edge",
-      animated: false,
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 16,
-        height: 16,
-        color,
-      },
-      style: { stroke: color, strokeWidth: executing ? 2 : 1.25 },
-      labelStyle: {
-        fill: executing ? LABEL_EXECUTING : LABEL_IDLE,
-        fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: "0.08em",
-        textTransform: "uppercase",
-      },
-      labelBgStyle: { fill: "var(--surface-panel)", fillOpacity: 0.94 },
-      labelBgPadding: [7, 4],
-      labelBgBorderRadius: 4,
-    };
-  });
-}
+const EDGE_TYPES = { canvas: CanvasEdgeRenderer } satisfies EdgeTypes;
 
 export function GraphCanvasPane() {
   const graph = useAppStore((state) => state.graph);
@@ -173,7 +74,7 @@ function CanvasView({ graph }: { readonly graph: GraphDefinitionV2 }) {
     buildCanvasNodes(graph, plan, collapsedGroups),
   );
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
-    buildCanvasEdges(graph, plan),
+    buildCanvasEdges(graph, plan, collapsedGroups),
   );
   const draggingRef = useRef(false);
 
@@ -184,7 +85,7 @@ function CanvasView({ graph }: { readonly graph: GraphDefinitionV2 }) {
   useEffect(() => {
     if (draggingRef.current) return;
     setNodes(buildCanvasNodes(graph, plan, collapsedGroups));
-    setEdges(buildCanvasEdges(graph, plan));
+    setEdges(buildCanvasEdges(graph, plan, collapsedGroups));
   }, [collapsedGroups, graph, plan, setEdges, setNodes]);
 
   const handleNodeDragStart = useCallback(() => {
@@ -194,10 +95,11 @@ function CanvasView({ graph }: { readonly graph: GraphDefinitionV2 }) {
   const handleNodeDragStop = useCallback<OnNodeDrag<CanvasFlowNode>>(
     (_event, node) => {
       draggingRef.current = false;
+      const position = absoluteGraphPosition(graph, node);
       updateGraph({
         ...graph,
         nodes: graph.nodes.map((item) =>
-          item.id === node.id ? { ...item, position: node.position } : item,
+          item.id === node.id ? { ...item, position } : item,
         ),
       });
     },

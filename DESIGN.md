@@ -28,7 +28,7 @@ Tinted semantic surfaces are mixed from the relevant accent with a charcoal surf
 
 Active renderer CSS consumes semantic aliases for interactive borders, selected surfaces, execution button states, status borders/text, scrims, and neutral shadows. Component rules do not introduce raw color literals outside the root token block. Layout geometry, spacing, and typography use named scale and shell-dimension tokens whenever values repeat across primitives or breakpoints.
 
-Canvas-specific aliases are `--canvas-grid-dot`, `--canvas-edge-idle`, `--canvas-minimap-node`, and `--canvas-minimap-mask`. Canvas geometry uses `--canvas-node-width` and `--canvas-minimap-width`. Incoming handles and selection use navigation blue; outgoing handles, active connections, and execution borders use execution orange.
+Canvas-specific aliases are `--canvas-grid-dot`, `--canvas-edge-idle`, `--canvas-minimap-node`, and `--canvas-minimap-mask`. Canvas geometry uses `--canvas-node-width`, `--canvas-node-height`, `--canvas-group-padding`, `--canvas-group-header-height`, and `--canvas-minimap-width`. Expanded groups add 32px token-aligned containment around member bounds and reserve a 40px header; ReactFlow receives parent-relative child coordinates while the graph persists absolute coordinates. Edge labels use canvas type, spacing, radius, and motion tokens rather than inline visual values. Incoming handles and selection use navigation blue; outgoing handles, active connections, and execution borders use execution orange.
 
 ### Typography
 
@@ -117,7 +117,7 @@ Centered modal for later node editing. Anatomy: title/description, bounded form 
 
 ### `CanvasNode` and `NodeToolCluster`
 
-`CanvasNode` is a neutral raised surface with compact kind icon, name, description, runtime metadata, and a text-plus-icon execution marker. States: default, hover, selected, running, selected-running, collapsed group, success, waiting, and failure. Names and model identifiers truncate safely without changing node geometry. `NodeToolCluster` is a vertical group of five 32px icon buttons for agent, decision, checkpoint, subgraph, and group creation. Each button has a visible native tooltip, accessible name, focus state, disabled state, and per-action loading state.
+`CanvasNode` is a memoized neutral raised surface with compact kind icon, name, description, runtime metadata, and a text-plus-icon execution marker. States: default, hover, selected, running, selected-running, collapsed group, success, waiting, and failure. Names and model identifiers truncate safely without changing node geometry. Group containers bound their descendants, expose a named expand/collapse button, and hide collapsed descendants plus incident edges. `NodeToolCluster` is a vertical group of five 32px icon buttons for agent, decision, checkpoint, subgraph, and group creation. Each button has a visible native tooltip, accessible name, focus state, disabled state, and per-action loading state.
 
 ## 6. Onboarding flow
 

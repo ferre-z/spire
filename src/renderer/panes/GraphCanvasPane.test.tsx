@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ReactNode } from "react";
+import { act, createElement, type ElementType, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphDefinitionV2, HarnessId } from "../../shared/domain";
@@ -15,7 +15,12 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 type MockFlowNode = {
   readonly id: string;
+  readonly type?: string;
   readonly position: { readonly x: number; readonly y: number };
+  readonly parentId?: string;
+  readonly extent?: string;
+  readonly data: Readonly<Record<string, unknown>>;
+  readonly style?: Readonly<Record<string, unknown>>;
 };
 
 type MockReactFlowProps = {
@@ -24,20 +29,30 @@ type MockReactFlowProps = {
   readonly minZoom: number;
   readonly maxZoom: number;
   readonly fitView: boolean;
+  readonly nodeTypes: Readonly<Record<string, ElementType>>;
   readonly onNodeClick: (event: MouseEvent, node: MockFlowNode) => void;
   readonly onPaneClick: () => void;
   readonly onNodeDragStart: () => void;
   readonly onNodeDragStop: (event: MouseEvent, node: MockFlowNode) => void;
-  readonly onNodesChange: (changes: readonly never[]) => void;
+  readonly onNodesChange: (changes: readonly MockNodePositionChange[]) => void;
   readonly children?: ReactNode;
+};
+
+type MockNodePositionChange = {
+  readonly id: string;
+  readonly type: "position";
+  readonly position: { readonly x: number; readonly y: number };
+  readonly dragging: boolean;
 };
 
 const flowHarness = vi.hoisted((): {
   props: MockReactFlowProps | undefined;
   fitView: ReturnType<typeof vi.fn>;
+  renderCount: number;
 } => ({
   props: undefined,
   fitView: vi.fn(),
+  renderCount: 0,
 }));
 
 vi.mock("@xyflow/react", async (importOriginal) => {
@@ -46,7 +61,18 @@ vi.mock("@xyflow/react", async (importOriginal) => {
     ...actual,
     ReactFlow: (props: MockReactFlowProps) => {
       flowHarness.props = props;
-      return props.children;
+      flowHarness.renderCount += 1;
+      return (
+        <>
+          {props.nodes.map((node) => {
+            const Renderer = node.type ? props.nodeTypes[node.type] : undefined;
+            return Renderer
+              ? createElement(Renderer, { id: node.id, key: node.id, data: node.data, selected: false })
+              : null;
+          })}
+          {props.children}
+        </>
+      );
     },
     useReactFlow: () => ({ fitView: flowHarness.fitView }),
   };
@@ -183,6 +209,7 @@ function buttonByName(surface: HTMLElement, name: string): HTMLButtonElement {
 beforeEach(() => {
   flowHarness.props = undefined;
   flowHarness.fitView.mockClear();
+  flowHarness.renderCount = 0;
   useAppStore.setState({
     snapshot: {
       onboardingComplete: true,
@@ -215,19 +242,43 @@ afterEach(async () => {
 });
 
 describe("v2 canvas builders", () => {
-  it("builds typed nodes, group membership, collapse, and execution overlays", () => {
-    const nodes = buildCanvasNodes(makeGraph(), makePlan(), ["team"]);
+  it("builds a real group container and converts member positions to parent-relative coordinates", () => {
+    const nodes = buildCanvasNodes(makeGraph(), makePlan());
     expect(nodes.map((node) => node.type)).toEqual(["group", "agent", "decision", "checkpoint"]);
-    expect(nodes.find((node) => node.id === "checker")?.parentId).toBe("group__team");
-    expect(nodes.find((node) => node.id === "group__team")?.data.collapsed).toBe(true);
-    expect(nodes.find((node) => node.id === "checker")?.data.active).toBe(true);
+    expect(nodes.find((node) => node.id === "group__team")).toMatchObject({
+      position: { x: 328, y: 120 },
+      style: { width: 276, height: 184 },
+      data: { collapsed: false, childCount: 1 },
+    });
+    expect(nodes.find((node) => node.id === "checker")).toMatchObject({
+      parentId: "group__team",
+      extent: "parent",
+      position: { x: 32, y: 40 },
+      data: { active: true },
+    });
+  });
+
+  it("hides collapsed descendants and every incident edge", () => {
+    const nodes = buildCanvasNodes(makeGraph(), makePlan(), ["team"]);
+    const edges = buildCanvasEdges(makeGraph(), makePlan(), ["team"]);
+    expect(nodes.map((node) => node.id)).toEqual(["group__team", "planner", "gate"]);
+    expect(nodes[0]?.data.collapsed).toBe(true);
+    expect(edges).toEqual([]);
   });
 
   it("builds semantic v2 edges and marks running connections as execution-active", () => {
     const [edge] = buildCanvasEdges(makeGraph(), makePlan());
-    expect(edge?.data).toEqual({ kind: "handoff", when: "success", label: "Plan to check" });
+    expect(edge?.data).toEqual({
+      kind: "handoff",
+      when: "success",
+      label: "Plan to check",
+      executing: true,
+    });
     expect(edge?.animated).toBe(false);
     expect(edge?.className).toBe("canvas-edge is-executing");
+    expect(edge?.type).toBe("canvas");
+    expect(edge).not.toHaveProperty("labelStyle");
+    expect(edge).not.toHaveProperty("labelBgStyle");
   });
 });
 
@@ -346,6 +397,16 @@ describe("canvas creation tools", () => {
 });
 
 describe("ReactFlow interaction contract", () => {
+  it("expands and collapses a group from its accessible control", async () => {
+    const surface = await renderCanvas();
+    const toggle = buttonByName(surface, "Collapse Review team");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    await click(toggle);
+    expect(useAppStore.getState().collapsedGroups).toEqual(["team"]);
+    expect(flowProps().nodes.map((node) => node.id)).not.toContain("checker");
+    expect(buttonByName(surface, "Expand Review team").getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("keeps zoom, fit-view, minimap, controls, selection, and canvas deselection enabled", async () => {
     const surface = await renderCanvas();
     const props = flowProps();
@@ -374,5 +435,30 @@ describe("ReactFlow interaction contract", () => {
     await act(async () => root?.render(<GraphCanvasPane />));
     expect(flowHarness.fitView).toHaveBeenCalledTimes(1);
     expect(surface.querySelector(".react-flow__controls")).not.toBeNull();
+  });
+
+  it("preserves grouped absolute positions, local drag state, viewport, and stable canvas renders", async () => {
+    await renderCanvas();
+    const initial = flowProps();
+    const checker = initial.nodes.find((node) => node.id === "checker");
+    if (!checker) throw new Error("Missing grouped checker node");
+    const locallyDragged = { ...checker, position: { x: 72, y: 64 } };
+    await act(async () => {
+      initial.onNodeDragStart();
+      initial.onNodesChange([{
+        id: checker.id,
+        type: "position",
+        position: locallyDragged.position,
+        dragging: true,
+      }]);
+    });
+    expect(flowProps().nodes.find((node) => node.id === "checker")?.position).toEqual({ x: 72, y: 64 });
+    const renderCount = flowHarness.renderCount;
+    await act(async () => useAppStore.setState({ selectedPatchId: "unrelated-shell-change" }));
+    expect(flowHarness.renderCount).toBe(renderCount);
+    expect(flowProps().nodes.find((node) => node.id === "checker")?.position).toEqual({ x: 72, y: 64 });
+    expect(flowHarness.fitView).toHaveBeenCalledTimes(1);
+    await act(async () => initial.onNodeDragStop(new MouseEvent("pointerup"), locallyDragged));
+    expect(useAppStore.getState().graph?.nodes.find((node) => node.id === "checker")?.position).toEqual({ x: 400, y: 184 });
   });
 });

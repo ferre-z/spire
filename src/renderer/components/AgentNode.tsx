@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import {
   Bot,
@@ -7,6 +7,8 @@ import {
   CircleCheck,
   CircleX,
   Clock3,
+  ChevronDown,
+  ChevronRight,
   FolderGit2,
   GitBranch,
   LoaderCircle,
@@ -14,6 +16,7 @@ import {
 } from "lucide-react";
 import type { GraphGroup, GraphNode } from "../../shared/domain";
 import type { NodeExecution, NodeExecutionStatus } from "../../shared/execution";
+import { useAppStore } from "../store";
 
 export type CanvasNodeData = {
   readonly node: GraphNode;
@@ -128,7 +131,7 @@ function nodeClassName(kind: GraphNode["kind"], active: boolean, selected: boole
   ].filter(Boolean).join(" ");
 }
 
-export function V2AgentNode({ data, selected }: NodeProps<CanvasNode>) {
+function V2AgentNodeView({ data, selected }: NodeProps<CanvasNode>) {
   const { node, execution, active } = data;
   if (node.kind !== "agent") return null;
   return (
@@ -144,7 +147,7 @@ export function V2AgentNode({ data, selected }: NodeProps<CanvasNode>) {
   );
 }
 
-export function V2DecisionNode({ data, selected }: NodeProps<CanvasNode>) {
+function V2DecisionNodeView({ data, selected }: NodeProps<CanvasNode>) {
   const { node, execution, active } = data;
   if (node.kind !== "decision") return null;
   return (
@@ -157,7 +160,7 @@ export function V2DecisionNode({ data, selected }: NodeProps<CanvasNode>) {
   );
 }
 
-export function V2CheckpointNode({ data, selected }: NodeProps<CanvasNode>) {
+function V2CheckpointNodeView({ data, selected }: NodeProps<CanvasNode>) {
   const { node, execution, active } = data;
   if (node.kind !== "checkpoint") return null;
   return (
@@ -169,7 +172,7 @@ export function V2CheckpointNode({ data, selected }: NodeProps<CanvasNode>) {
   );
 }
 
-export function V2SubgraphNode({ data, selected }: NodeProps<CanvasNode>) {
+function V2SubgraphNodeView({ data, selected }: NodeProps<CanvasNode>) {
   const { node, execution, active } = data;
   if (node.kind !== "subgraph") return null;
   return (
@@ -181,8 +184,10 @@ export function V2SubgraphNode({ data, selected }: NodeProps<CanvasNode>) {
   );
 }
 
-export function V2GroupNode({ data, selected }: NodeProps<GroupNode>) {
+function V2GroupNodeView({ data, selected }: NodeProps<GroupNode>) {
   const { group, childCount, collapsed } = data;
+  const collapseGroup = useAppStore((state) => state.collapseGroup);
+  const action = collapsed ? "Expand" : "Collapse";
   return (
     <div className={`canvas-node canvas-node--group ${collapsed ? "is-collapsed" : ""} ${selected ? "is-selected" : ""}`}>
       <Handle type="target" position={Position.Top} className="node-handle node-handle--incoming" />
@@ -191,9 +196,48 @@ export function V2GroupNode({ data, selected }: NodeProps<GroupNode>) {
       <div className="canvas-node-header">
         <span className="canvas-node-icon"><Box size={15} /></span>
         <span className="canvas-node-label">Group</span>
+        <strong className="canvas-group-name" title={group.name}>{group.name}</strong>
+        <span className="canvas-group-count">{childCount}</span>
+        <button
+          type="button"
+          className="canvas-group-toggle nodrag nopan"
+          aria-expanded={!collapsed}
+          aria-label={`${action} ${group.name}`}
+          title={`${action} ${group.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            collapseGroup(group.id);
+          }}
+        >
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+        </button>
       </div>
-      <div className="canvas-node-title"><h3 title={group.name}>{group.name}</h3></div>
-      <p className="canvas-node-subtitle">{childCount} node{childCount === 1 ? "" : "s"}</p>
     </div>
   );
 }
+
+function canvasNodePropsEqual(
+  previous: NodeProps<CanvasNode>,
+  next: NodeProps<CanvasNode>,
+): boolean {
+  return previous.selected === next.selected
+    && previous.data.node === next.data.node
+    && previous.data.execution === next.data.execution
+    && previous.data.active === next.data.active;
+}
+
+function groupNodePropsEqual(
+  previous: NodeProps<GroupNode>,
+  next: NodeProps<GroupNode>,
+): boolean {
+  return previous.selected === next.selected
+    && previous.data.group === next.data.group
+    && previous.data.childCount === next.data.childCount
+    && previous.data.collapsed === next.data.collapsed;
+}
+
+export const V2AgentNode = memo(V2AgentNodeView, canvasNodePropsEqual);
+export const V2DecisionNode = memo(V2DecisionNodeView, canvasNodePropsEqual);
+export const V2CheckpointNode = memo(V2CheckpointNodeView, canvasNodePropsEqual);
+export const V2SubgraphNode = memo(V2SubgraphNodeView, canvasNodePropsEqual);
+export const V2GroupNode = memo(V2GroupNodeView, groupNodePropsEqual);

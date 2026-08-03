@@ -55,5 +55,17 @@ describe("active renderer design contract", () => {
     expect(canvasRules).toContain(".canvas-node-status.status--failed");
     expect(canvasRules).not.toMatch(/#[\da-f]{3,8}|rgba?\(/i);
     expect(canvasRules).not.toContain("animation:");
+    expect(canvasRules).toContain("var(--canvas-group-padding)");
+    expect(canvasRules).toContain("var(--canvas-edge-label-padding-block)");
+    expect(canvasRules).toContain("var(--canvas-edge-label-font)");
+    expect(canvasRules).toContain("var(--canvas-edge-label-radius)");
+    expect(canvasRules).toContain("var(--canvas-motion-duration)");
+    expect(canvasRules).toContain("var(--canvas-group-header-height)");
+    expect(canvasRules).toContain("var(--canvas-selection-outline-width)");
+    expect(canvasRules).toContain("var(--canvas-handle-border-width)");
+    expect(canvasRules).not.toMatch(/labelStyle|labelBgStyle/);
+    expect(canvasRules).not.toMatch(
+      /^[ \t]+(?:gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?|border-radius|font(?:-size)?|line-height|letter-spacing|animation(?:-duration)?|transition(?:-duration)?|outline(?:-offset)?)\s*:[^;}]*(?:\d+(?:\.\d+)?(?:px|em|ms))/im,
+    );
   });
 });
