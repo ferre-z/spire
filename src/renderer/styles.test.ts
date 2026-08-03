@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const renderedRules = stylesheet.replace(/:root\s*\{[^}]*\}/gs, "");
 const contractStart = stylesheet.lastIndexOf(":root {");
 const activeRulesStart = stylesheet.indexOf("\nbody {", contractStart);
 const activeRules = stylesheet.slice(activeRulesStart);
@@ -40,6 +41,10 @@ describe("active renderer design contract", () => {
     expect(stylesheet.slice(contractStart, activeRulesStart)).toContain(
       "--overlay-scrim",
     );
+  });
+
+  it("routes every rendered color through semantic tokens", () => {
+    expect(renderedRules).not.toMatch(/#[\da-f]{3,8}|rgba?\(/i);
   });
 
   it("uses three proportional columns and a segmented compact dialog", () => {
