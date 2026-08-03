@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, setWindowSize, type LaunchedApp } from "./fixtures";
-import { mockRun, seedGraph } from "./seed";
+import { mockPlan, mockRun, seedGraph } from "./seed";
 
 let launched: LaunchedApp | undefined;
 
@@ -13,7 +13,7 @@ test.describe("fixed workspace visual regression", () => {
   test("onboarding", async () => {
     launched = await launchApp({ onboardingComplete: false, graphsV2: [] });
     await setWindowSize(launched.app, 1440, 900);
-    await launched.page.locator(".onboarding-card").waitFor();
+    await launched.page.locator(".onboarding-panel").waitFor();
     await expect(launched.page).toHaveScreenshot("onboarding.png", {
       animations: "disabled",
     });
@@ -40,7 +40,11 @@ test.describe("fixed workspace visual regression", () => {
   test("active run with history and result drawer", async () => {
     const graph = seedGraph("graph-alpha", "Build & Review");
     const run = mockRun(graph);
-    launched = await launchApp({ graphsV2: [graph], runs: [run] });
+    launched = await launchApp({
+      graphsV2: [graph],
+      runs: [run],
+      plans: [mockPlan(graph, run)],
+    });
     await setWindowSize(launched.app, 1440, 900);
     const { page } = launched;
     await page.getByRole("button", { name: "Run History" }).click();

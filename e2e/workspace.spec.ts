@@ -4,7 +4,7 @@ import {
   setWindowSize,
   type LaunchedApp,
 } from "./fixtures";
-import { mockRun, seedGraph } from "./seed";
+import { mockPlan, mockRun, seedGraph } from "./seed";
 
 const WIDE = { width: 1440, height: 900 } as const;
 
@@ -29,6 +29,18 @@ function canvasNode(page: Page, nodeId: string) {
 }
 
 test.describe("fixed workspace shell", () => {
+  test("completes onboarding from a discovered harness and model without credentials", async () => {
+    launched = await launchApp({ onboardingComplete: false, graphsV2: [] });
+    const { page } = launched;
+    await expect(page.locator(".onboarding-panel")).toBeVisible();
+    await expect(page.getByText(/API key|credential/i)).toHaveCount(0);
+    await page.getByRole("radio", { name: /OpenCode/ }).click();
+    await page.getByRole("radio", { name: /Fixture Model/ }).check();
+    await page.getByRole("button", { name: "Enter Spire" }).click();
+    await expect(page.locator(".workspace-shell")).toBeVisible();
+    await expect(page.locator(".titlebar-context")).toContainText("Build & Review");
+  });
+
   for (const size of [
     { width: 800, height: 600 },
     { width: 1024, height: 700 },
@@ -58,7 +70,12 @@ test.describe("fixed workspace shell", () => {
   test("activates Run History and switches utility drawers", async () => {
     const graph = seedGraph("graph-alpha", "Build & Review");
     const run = mockRun(graph);
-    const { page } = await launchWide({ graphsV2: [graph], runs: [run] });
+    const plan = mockPlan(graph, run);
+    const { page } = await launchWide({
+      graphsV2: [graph],
+      runs: [run],
+      plans: [plan],
+    });
 
     await page.getByRole("button", { name: "Run History" }).click();
     const history = page.locator('[data-pane="run-history"]');
@@ -68,7 +85,10 @@ test.describe("fixed workspace shell", () => {
 
     await page.getByRole("button", { name: "Diff" }).click();
     await expect(page.getByRole("dialog", { name: "Diff" })).toBeVisible();
-    await page.getByRole("button", { name: "Result", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "Diff" })
+      .getByRole("button", { name: "Result", exact: true })
+      .click();
     await expect(page.getByRole("dialog", { name: "Result" })).toBeVisible();
     await page.getByRole("button", { name: "Close Result" }).click();
     await expect(page.getByRole("dialog", { name: "Result" })).toHaveCount(0);

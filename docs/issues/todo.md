@@ -12,9 +12,9 @@ availability.
 - Verification: `src/renderer/components/Onboarding.test.tsx`,
   `src/renderer/panes/HarnessesPane.test.tsx`, renderer store harness/model
   contract tests, plus full `pnpm test`, `pnpm typecheck`, and `pnpm build`.
-- Electron limitation: first-run E2E performs the real packaged runtime probe;
-  no test-only credential or fake external CLI is injected. Component/contract
-  tests provide deterministic discovery/model coverage without credentials.
+- Packaged Electron verification: first-run onboarding discovers deterministic
+  CLI fixture adapters, selects a native harness/model pair, and enters Spire
+  without rendering or transporting credentials.
 
 ## 2. Node settings — resolved
 
@@ -41,11 +41,12 @@ premium charcoal surface with orange/blue accents.
   canvas), `42896b2` (group hardening), and `5ab0f31` (shared canvas metrics).
 - Verification: renderer workspace/canvas component and contract tests, plus
   full `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `pnpm build`.
-- Electron E2E status at cleanup commit `0f0e08e`: pending. The focused run
-  used a package built without `SPIRE_ALLOW_INSPECT=1`, so Playwright timed out
-  inside `electron.launch` before app readiness or role selectors were reached.
-  The migrated `e2e/workspace.spec.ts` and `e2e/visual.spec.ts` scenarios were
-  not claimed as passing at that commit.
+- Packaged Electron verification: all 15 focused workspace and visual scenarios
+  pass. Coverage includes credential-free onboarding, run activation, utility
+  drawers, node editing and version save, canvas interactions, command and F6
+  keyboard navigation, reduced motion, the window policy, and overflow checks
+  at 800x600, 1024x700, 1440x900, and 1920x1080. Current screenshots cover
+  onboarding, wide and compact shells, an active run, and the node dialog.
 
 The former FlexLayout renderer and its dependency are removed. Existing
 workspace-layout rows and their shared/main/preload/database persistence APIs
