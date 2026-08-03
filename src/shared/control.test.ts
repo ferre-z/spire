@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  appSnapshotSchema,
   CONTROL_CAPABILITIES,
   CONTROL_OPERATION_NAMES,
   CONTROL_PAGE_MAX_LIMIT,
   controlOperationNameSchema,
   graphRefSchema,
+  updateGraphInputSchema,
   pageInputSchema,
   runIdInputSchema,
 } from "./control";
+import { migrateLegacyGraph } from "../main/graph-migration";
+import type { GraphDefinition } from "./domain";
 import {
   TRACE_QUERY_MAX_LIMIT,
   traceCursorSchema,
@@ -123,6 +127,75 @@ describe("CONTROL_CAPABILITIES", () => {
     expect(
       CONTROL_CAPABILITIES["state.get"].inputSchema.safeParse({ extra: 1 })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe("renderer graph contracts", () => {
+  const legacy: GraphDefinition = {
+    id: "legacy",
+    name: "Legacy",
+    version: 1,
+    maxIterations: 3,
+    createdAt: "2026-07-29T12:00:00.000Z",
+    nodes: [
+      {
+        id: "planner",
+        type: "opencode",
+        role: "planner",
+        name: "Architect",
+        instructions: "Plan",
+        model: "model-1",
+        position: { x: 0, y: 0 },
+      },
+      {
+        id: "implementer",
+        type: "opencode",
+        role: "implementer",
+        name: "Builder",
+        instructions: "Build",
+        model: "model-1",
+        position: { x: 200, y: 0 },
+      },
+    ],
+    edges: [
+      {
+        id: "plan",
+        source: "planner",
+        target: "implementer",
+        condition: "always",
+        label: "plan",
+      },
+      {
+        id: "review",
+        source: "implementer",
+        target: "planner",
+        condition: "always",
+        label: "review",
+      },
+    ],
+  };
+  const v2 = migrateLegacyGraph(legacy);
+
+  it("accepts graph v2 and rejects legacy graphs in update input", () => {
+    expect(updateGraphInputSchema.safeParse({ graph: v2 }).success).toBe(true);
+    expect(updateGraphInputSchema.safeParse({ graph: legacy }).success).toBe(false);
+  });
+
+  it("accepts graph v2 snapshots without a flat models collection", () => {
+    const snapshot = {
+      onboardingComplete: false,
+      openCode: {
+        installed: false,
+        compatible: false,
+        connected: false,
+      },
+      graphs: [v2],
+      runs: [],
+    };
+    expect(appSnapshotSchema.safeParse(snapshot).success).toBe(true);
+    expect(
+      appSnapshotSchema.safeParse({ ...snapshot, models: [] }).success,
     ).toBe(false);
   });
 });

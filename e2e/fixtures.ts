@@ -25,8 +25,8 @@ export type LaunchedApp = {
 
 /**
  * Launch the packaged Spire build against an isolated, pre-seeded userData
- * directory. The app under test is the production package so the file://
- * popout allowlist is exercised exactly as shipped.
+ * directory. The app under test is the production package and communicates
+ * with the same main/preload boundaries as a user-launched build.
  */
 export async function launchApp(
   options: SeedOptions = {},
@@ -40,10 +40,7 @@ export async function launchApp(
     args: [
       "--no-sandbox",
       "--disable-gpu",
-      "--disable-gpu-sandbox",
-      "--disable-software-rasterizer",
       "--disable-dev-shm-usage",
-      "--disable-features=GPUMemoryBufferVideoFrames,VizDisplayCompositor",
     ],
     env: {
       ...process.env,
@@ -53,7 +50,7 @@ export async function launchApp(
     timeout: 60_000,
   });
   const page = await app.firstWindow();
-  await page.waitForSelector(".flexlayout__layout, .onboarding-shell", {
+  await page.waitForSelector(".workspace-shell, .onboarding-shell", {
     timeout: 30_000,
   });
   return {
@@ -79,17 +76,4 @@ export async function setWindowSize(
     },
     { width, height },
   );
-}
-
-/** Wait out the 300ms debounced layout save plus IPC round trip. */
-export async function waitForLayoutSave(page: Page): Promise<void> {
-  await page.waitForTimeout(650);
-}
-
-export function tabButton(page: Page, title: string) {
-  return page.locator(".flexlayout__tab_button", { hasText: title });
-}
-
-export function selectedTab(page: Page) {
-  return page.locator(".flexlayout__tab_button--selected");
 }

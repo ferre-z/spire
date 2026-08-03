@@ -1,10 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type SpireApi } from "../shared/api";
 import type {
-  GraphDefinition,
   GraphDefinitionV2,
   HarnessId,
-  ProviderInput,
+  OnboardingSelection,
   RunEvent,
   StartRunInput,
 } from "../shared/domain";
@@ -21,10 +20,10 @@ import type { WorkspaceLayoutRecord } from "../shared/workspace";
 const api: SpireApi = {
   snapshot: () => ipcRenderer.invoke(IPC.snapshot),
   detectOpenCode: () => ipcRenderer.invoke(IPC.detectOpenCode),
-  connectOpenRouter: (input: ProviderInput) =>
-    ipcRenderer.invoke(IPC.connectOpenRouter, input),
+  completeOnboarding: (selection: OnboardingSelection) =>
+    ipcRenderer.invoke(IPC.completeOnboarding, selection),
   chooseRepository: () => ipcRenderer.invoke(IPC.chooseRepository),
-  saveGraph: (graph: GraphDefinition | GraphDefinitionV2) =>
+  saveGraph: (graph: GraphDefinitionV2) =>
     ipcRenderer.invoke(IPC.saveGraph, graph),
   startRun: (input: StartRunInput) =>
     ipcRenderer.invoke(IPC.startRun, input),

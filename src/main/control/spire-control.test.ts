@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   GraphDefinition,
   GraphDefinitionV2,
+  HarnessId,
   PlanMutation,
   RunRecord,
 } from "../../shared/domain";
@@ -49,30 +50,36 @@ function okOutcome(summary = "done"): NodeOutcome {
 
 /** HarnessAdapter fake driving the scheduler-based RunEngine. */
 class FakeAdapter implements HarnessAdapter {
-  readonly id = "opencode" as const;
+  readonly id: HarnessId;
+  probeResult: HarnessProbeStatus;
+  modelsResult = [{ id: "openrouter/test-model", name: "Test Model" }];
   private index = 0;
 
   constructor(
     private readonly outputs: unknown[] = [],
     private readonly hang = false,
-  ) {}
-
-  async probe(): Promise<HarnessProbeStatus> {
-    return {
-      harnessId: "opencode",
+    id: HarnessId = "opencode",
+  ) {
+    this.id = id;
+    this.probeResult = {
+      harnessId: id,
       installed: true,
-      binaryPath: "/usr/bin/opencode",
+      binaryPath: `/usr/bin/${id}`,
       version: "1.0.0",
       compatible: true,
       connected: true,
     };
   }
+
+  async probe(): Promise<HarnessProbeStatus> {
+    return this.probeResult;
+  }
   async listModels() {
-    return [{ id: "openrouter/test-model", name: "Test Model" }];
+    return this.modelsResult;
   }
   run(input: HarnessRunInput): Promise<HarnessRunResult> {
     const ref: HarnessSessionRef = {
-      harnessId: "opencode",
+      harnessId: this.id,
       sessionId: input.session?.sessionId ?? `session-${this.index}`,
       directory: input.directory,
     };
@@ -434,7 +441,7 @@ describe("SpireControl registry", () => {
       control.execute("graphs.get", { graphId: "graph" }),
     ).resolves.toMatchObject({ id: "graph" });
     await expect(
-      control.execute("graphs.save", { graph: graph("other") }),
+      control.execute("graphs.save", { graph: graphV2("other") }),
     ).resolves.toMatchObject({ id: "other" });
     await expect(
       control.execute("repositories.validate", { path: repositoryPath }),
@@ -632,7 +639,8 @@ describe("state.get / diagnostics.get", () => {
     const snapshot = await control.execute("state.get", {});
     expect(snapshot.onboardingComplete).toBe(true);
     expect(snapshot.graphs).toHaveLength(1);
-    expect(snapshot.models).toEqual([]);
+    expect(snapshot.graphs[0]?.nodes[0]?.kind).toBe("agent");
+    expect("models" in snapshot).toBe(false);
     expect(snapshot.activeRunId).toBeUndefined();
     expect(snapshot.openCode.installed).toBe(false);
   });
@@ -668,8 +676,8 @@ describe("graphs operations", () => {
   it("paginates graphs.list with an opaque cursor", async () => {
     const { control, database } = createControl();
     database.saveGraph(graph("g1"));
-    database.saveGraph(graph("g2"));
-    database.saveGraph(graph("g3"));
+    database.saveGraphV2(graphV2("g2"));
+    database.saveGraphV2(graphV2("g3"));
 
     const first = await control.execute("graphs.list", { limit: 2 });
     expect(first.graphs).toHaveLength(2);
@@ -689,7 +697,7 @@ describe("graphs operations", () => {
   it("gets the latest version by default and a pinned version on request", async () => {
     const { control, database } = createControl();
     database.saveGraph(graph("g", 1));
-    database.saveGraph({ ...graph("g", 2), name: "Build v2" });
+    database.saveGraphV2({ ...graphV2("g", 2), name: "Build v2" });
 
     const latest = await control.execute("graphs.get", { graphId: "g" });
     expect(latest.version).toBe(2);
@@ -703,17 +711,24 @@ describe("graphs operations", () => {
     );
   });
 
-  it("bumps the version when saving over an existing graph version", async () => {
+  it("validates v2 and increments the highest stored version for an existing id", async () => {
     const { control, database } = createControl();
-    const first = await control.execute("graphs.save", { graph: graph("g") });
+    const first = await control.execute("graphs.save", { graph: graphV2("g") });
     expect(first.version).toBe(1);
+    database.saveGraphV2(graphV2("g", 4));
+    const suppliedCreatedAt = "2026-07-29T12:00:00.000Z";
     const second = await control.execute("graphs.save", {
-      graph: { ...graph("g"), name: "Renamed" },
+      graph: {
+        ...graphV2("g", 99),
+        name: "Renamed",
+        createdAt: suppliedCreatedAt,
+      },
     });
-    expect(second.version).toBe(2);
-    expect(database.listGraphs().filter((item) => item.id === "g")).toHaveLength(
-      2,
-    );
+    expect(second.version).toBe(5);
+    expect(second.createdAt).not.toBe(suppliedCreatedAt);
+    expect(
+      database.listGraphsV2().filter((item) => item.id === "g"),
+    ).toHaveLength(3);
   });
 
   it("rejects an invalid graph through input validation", async () => {
@@ -1517,14 +1532,17 @@ describe("runs.plan.promote", () => {
 });
 
 describe("AppService facade", () => {
-  function createService(answers: string[] = []) {
+  function createService(
+    answers: string[] = [],
+    adapter = new FakeAdapter(),
+  ) {
     const database = new SpireDatabase(":memory:");
     const harness = new FakeHarness(answers);
-    const registry = createHarnessRegistry([new FakeAdapter()]);
+    const registry = createHarnessRegistry([adapter]);
     const backend = new FakeBackend();
     const engine = new RunEngine(database, registry, backend, () => undefined);
     const service = new AppService(database, harness, engine, backend, registry);
-    return { service, database, harness, backend };
+    return { service, database, harness, adapter, backend };
   }
 
   it("keeps the snapshot shape the renderer expects", () => {
@@ -1532,10 +1550,10 @@ describe("AppService facade", () => {
     const snapshot = service.snapshot();
     expect(snapshot).toMatchObject({
       onboardingComplete: false,
-      models: [],
       graphs: [],
       runs: [],
     });
+    expect("models" in snapshot).toBe(false);
     expect(snapshot.openCode).toBeDefined();
   });
 
@@ -1545,31 +1563,99 @@ describe("AppService facade", () => {
     expect(snapshot.openCode.installed).toBe(true);
   });
 
-  it("connects OpenRouter, seeds a default graph, and completes onboarding", async () => {
-    const { service, harness } = createService();
-    const snapshot = await service.connectOpenRouter({ apiKey: "  key-1 " });
-    expect(harness.connectedApiKey).toBe("key-1");
+  it("re-probes the selected harness and seeds a v2 graph with the selected model", async () => {
+    const { service, database } = createService();
+    const snapshot = await service.completeOnboarding({
+      harnessId: "opencode",
+      modelId: "openrouter/test-model",
+    });
     expect(snapshot.onboardingComplete).toBe(true);
-    expect(snapshot.models).toHaveLength(1);
     expect(snapshot.graphs).toHaveLength(1);
+    expect(snapshot.graphs[0]?.name).toBe("Build & Review");
+    expect(
+      snapshot.graphs[0]?.nodes.every(
+        (node) =>
+          node.kind === "agent" &&
+          node.harnessId === "opencode" &&
+          node.modelId === "openrouter/test-model",
+      ),
+    ).toBe(true);
+    expect(database.getSetting("onboardingComplete")).toBe("true");
+    expect(database.getSetting("harnessId")).toBeUndefined();
+    expect(database.getSetting("modelId")).toBeUndefined();
   });
 
-  it("rejects an empty API key and an empty model list", async () => {
-    const { service, harness } = createService();
+  it("uses a non-OpenCode harness selected from the registry", async () => {
+    const adapter = new FakeAdapter([], false, "codex");
+    adapter.modelsResult = [{ id: "openai/gpt-5", name: "GPT-5" }];
+    const { service } = createService([], adapter);
+    const snapshot = await service.completeOnboarding({
+      harnessId: "codex",
+      modelId: "openai/gpt-5",
+    });
+    expect(
+      snapshot.graphs[0]?.nodes.every(
+        (node) =>
+          node.kind === "agent" &&
+          node.harnessId === "codex" &&
+          node.modelId === "openai/gpt-5",
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["unavailable", { installed: false, compatible: false, connected: false }],
+    ["incompatible", { installed: true, compatible: false, connected: true }],
+    ["disconnected", { installed: true, compatible: true, connected: false }],
+  ])("rejects an %s selected harness without completing onboarding", async (_label, state) => {
+    const { service, database, adapter } = createService();
+    adapter.probeResult = { ...adapter.probeResult, ...state };
     await expect(
-      service.connectOpenRouter({ apiKey: "   " }),
-    ).rejects.toThrow(/api key/i);
-    harness.modelsResult = [];
+      service.completeOnboarding({
+        harnessId: "opencode",
+        modelId: "openrouter/test-model",
+      }),
+    ).rejects.toThrow();
+    expect(database.getSetting("onboardingComplete")).toBeUndefined();
+    expect(database.listGraphsV2()).toHaveLength(0);
+  });
+
+  it("rejects an empty or absent model selection after re-reading models", async () => {
+    const { service, database, adapter } = createService();
+    adapter.modelsResult = [];
     await expect(
-      service.connectOpenRouter({ apiKey: "key-1" }),
-    ).rejects.toThrow(/no models/i);
+      service.completeOnboarding({
+        harnessId: "opencode",
+        modelId: "openrouter/test-model",
+      }),
+    ).rejects.toThrow(/model/i);
+    adapter.modelsResult = [{ id: "other-model", name: "Other" }];
+    await expect(
+      service.completeOnboarding({
+        harnessId: "opencode",
+        modelId: "missing-model",
+      }),
+    ).rejects.toThrow(/model/i);
+    expect(database.getSetting("onboardingComplete")).toBeUndefined();
+  });
+
+  it("does not seed a duplicate when any graph already exists", async () => {
+    const { service, database } = createService();
+    database.saveGraph(graph("existing"));
+    const snapshot = await service.completeOnboarding({
+      harnessId: "opencode",
+      modelId: "openrouter/test-model",
+    });
+    expect(snapshot.graphs).toHaveLength(1);
+    expect(snapshot.graphs[0]?.id).toBe("existing");
+    expect(snapshot.graphs[0]?.nodes[0]?.kind).toBe("agent");
   });
 
   it("saves graphs with version bumps and returns the snapshot", async () => {
     const { service } = createService();
-    const first = await service.saveGraph(graph("g"));
+    const first = await service.saveGraph(graphV2("g"));
     expect(first.graphs).toHaveLength(1);
-    const second = await service.saveGraph({ ...graph("g"), name: "v2" });
+    const second = await service.saveGraph({ ...graphV2("g"), name: "v2" });
     expect(second.graphs.filter((item) => item.id === "g")).toHaveLength(2);
   });
 

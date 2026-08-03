@@ -3,10 +3,9 @@ import { writeFile } from "node:fs/promises";
 import type { BrowserWindow } from "electron";
 import { IPC } from "../shared/api";
 import type {
-  GraphDefinition,
   GraphDefinitionV2,
   HarnessId,
-  ProviderInput,
+  OnboardingSelection,
   RunEvent,
   StartRunInput,
 } from "../shared/domain";
@@ -42,7 +41,7 @@ export function detectEnvironment(
  * open dialog, then `repositories.validate`), patch export
  * (`runs.artifacts.get`, then a native save dialog), shell/environment
  * operations that have no control capability, and onboarding
- * (`control.connectOpenRouter`). Mutations that the renderer contract answers
+ * (`control.completeOnboarding`). Mutations that the renderer contract answers
  * with an `AppSnapshot` compose it via `control.snapshot()` — the same body
  * as `state.get` — so each handler still dispatches a single capability.
  *
@@ -57,8 +56,8 @@ export function registerIpc(
     await control.execute("harnesses.list");
     return control.snapshot();
   });
-  ipcMain.handle(IPC.connectOpenRouter, (_event, input: ProviderInput) =>
-    control.connectOpenRouter(input),
+  ipcMain.handle(IPC.completeOnboarding, (_event, selection: OnboardingSelection) =>
+    control.completeOnboarding(selection),
   );
   ipcMain.handle(IPC.chooseRepository, async () => {
     const window = getWindow();
@@ -77,7 +76,7 @@ export function registerIpc(
   });
   ipcMain.handle(
     IPC.saveGraph,
-    async (_event, graph: GraphDefinition | GraphDefinitionV2) => {
+    async (_event, graph: GraphDefinitionV2) => {
       await control.execute("graphs.save", { graph });
       return control.snapshot();
     },

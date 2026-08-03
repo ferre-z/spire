@@ -334,8 +334,7 @@ export type ModelOption = {
 export type AppSnapshot = {
   onboardingComplete: boolean;
   openCode: OpenCodeStatus;
-  models: ModelOption[];
-  graphs: GraphDefinition[];
+  graphs: GraphDefinitionV2[];
   runs: RunRecord[];
   activeRunId?: string;
 };
@@ -347,9 +346,11 @@ export type StartRunInput = {
 };
 
 export type UpdateGraphInput = {
-  graph: GraphDefinition;
+  graph: GraphDefinitionV2;
 };
 
-export type ProviderInput = {
-  apiKey: string;
-};
+export const onboardingSelectionSchema = z.strictObject({
+  harnessId: harnessIdSchema,
+  modelId: z.string().trim().min(1),
+});
+export type OnboardingSelection = z.infer<typeof onboardingSelectionSchema>;

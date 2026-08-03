@@ -142,9 +142,33 @@ diffs.
 OpenCode, Codex, and Claude Code are the production harnesses for this release.
 Each implements the normalized `HarnessAdapter` contract (`probe`, `listModels`,
 `run`, `abort`, `close`). Native CLI authentication remains owned by each
-harness — Spire never stores native harness credentials. The harness registry
-discovers installed harnesses, probes their status, and routes each node through
-the adapter configured for that node's `harnessId`.
+harness: authenticate with the native `opencode`, `codex`, or `claude` CLI,
+never inside Spire. Spire stores no native harness credentials and only probes
+whether a runtime is installed/available and which models that runtime exposes.
+The harness registry routes each node through the adapter configured for that
+node's `harnessId`.
+
+## Workspace interface
+
+The renderer uses a fixed graph workspace rather than user-dockable panes:
+
+- The activity rail on the left selects Graph Library, Run History, Harnesses,
+  and Collaboration. The context panel contains graph/runtime controls, and the
+  utility rail on the right opens Live Stream, Diff, and Result drawers.
+- The graph canvas remains central. Selecting a node opens a modal with input,
+  editable settings, and output; closing and reopening it retains live edits,
+  while **Save version** persists a new graph version.
+- The 64px launch dock remains anchored across the bottom for repository, goal,
+  and run controls.
+- `Cmd/Ctrl+K` opens the command menu. `F6` and `Shift+F6` move focus forward
+  and backward through the major workspace regions.
+- At 1280px and wider, navigation and context are fixed beside the canvas.
+  Below 1280px context becomes an overlay; below 1100px navigation does too;
+  below 861px the launcher compacts. The supported minimum window is 800×600.
+
+The legacy workspace-layout persistence table and shared/main/preload APIs are
+retained for data compatibility. The fixed renderer does not read or write
+those records, so existing rows remain intact and inert.
 
 ### Failure routing
 
@@ -340,8 +364,6 @@ Install at least one supported harness CLI for real execution:
 - Codex (`codex`)
 - Claude Code (`claude`)
 
-An OpenRouter API key is needed only when using OpenRouter-backed models.
-
 ## Install and run
 
 From this repository:
@@ -360,9 +382,9 @@ If pnpm asks whether to run these build scripts, approve:
 - `esbuild`
 - `better-sqlite3`
 
-Then launch Spire, select a repository, and configure harnesses. Native harness
-credentials are entered directly in each CLI's own authentication flow — Spire
-never stores them.
+Then authenticate in at least one native CLI, launch Spire, and complete the
+two-step onboarding flow. Onboarding discovers connected runtimes and their
+available models; it never requests or stores CLI credentials.
 
 ## Development commands
 

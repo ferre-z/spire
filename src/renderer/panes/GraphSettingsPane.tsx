@@ -1,29 +1,16 @@
 import { GitCompare, Save } from "lucide-react";
-import { isGraphV2, useAppStore } from "../store";
+import { useAppStore } from "../store";
 
 export function useSaveGraph() {
-  const graph = useAppStore((state) => state.graph)!;
-  const applySnapshot = useAppStore((state) => state.applySnapshot);
-  const setBusy = useAppStore((state) => state.setBusy);
-  const setError = useAppStore((state) => state.setError);
-
-  return async () => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      applySnapshot(await window.spire.saveGraph(graph));
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  };
+  return useAppStore((state) => state.saveCurrentGraph);
 }
 
 export function GraphSettingsPane() {
-  const graph = useAppStore((state) => state.graph)!;
+  const graph = useAppStore((state) => state.graph);
   const updateGraph = useAppStore((state) => state.updateGraph);
   const save = useSaveGraph();
+
+  if (!graph) return <div className="pane pane-empty">No graph selected.</div>;
 
   return (
     <div className="pane pane-scroll pane-form" data-pane="graph-settings">
@@ -37,27 +24,18 @@ export function GraphSettingsPane() {
         />
       </div>
       <div className="setting-block">
-        <label>
-          {isGraphV2(graph) ? "MAX STEPS" : "MAX IMPLEMENTATION PASSES"}
-        </label>
+        <label>MAX STEPS</label>
         <div className="range-row">
           <input
             type="range"
             min={1}
-            max={isGraphV2(graph) ? graph.maxSteps : graph.maxIterations}
-            value={isGraphV2(graph) ? graph.maxSteps : graph.maxIterations}
+            max={500}
+            value={graph.maxSteps}
             onChange={(event) => {
-              const value = Number(event.target.value);
-              if (isGraphV2(graph)) {
-                updateGraph({ ...graph, maxSteps: value });
-              } else {
-                updateGraph({ ...graph, maxIterations: value });
-              }
+              updateGraph({ ...graph, maxSteps: Number(event.target.value) });
             }}
           />
-          <strong>
-            {isGraphV2(graph) ? graph.maxSteps : graph.maxIterations}
-          </strong>
+          <strong>{graph.maxSteps}</strong>
         </div>
       </div>
       <div className="graph-rule">

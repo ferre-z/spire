@@ -1,10 +1,9 @@
 import type {
   AppSnapshot,
-  GraphDefinition,
   GraphDefinitionV2,
   HarnessId,
   ModelOption,
-  ProviderInput,
+  OnboardingSelection,
   RunEvent,
   StartRunInput,
 } from "./domain";
@@ -35,9 +34,9 @@ export type Unsubscribe = () => void;
 export interface SpireApi {
   snapshot(): Promise<AppSnapshot>;
   detectOpenCode(): Promise<AppSnapshot>;
-  connectOpenRouter(input: ProviderInput): Promise<AppSnapshot>;
+  completeOnboarding(selection: OnboardingSelection): Promise<AppSnapshot>;
   chooseRepository(): Promise<string | null>;
-  saveGraph(graph: GraphDefinition | GraphDefinitionV2): Promise<AppSnapshot>;
+  saveGraph(graph: GraphDefinitionV2): Promise<AppSnapshot>;
   startRun(input: StartRunInput): Promise<AppSnapshot>;
   stopRun(runId: string): Promise<AppSnapshot>;
   retryRun(runId: string): Promise<AppSnapshot>;
@@ -68,7 +67,7 @@ export interface SpireApi {
 export const IPC = {
   snapshot: "spire:snapshot",
   detectOpenCode: "spire:detect-opencode",
-  connectOpenRouter: "spire:connect-openrouter",
+  completeOnboarding: "spire:complete-onboarding",
   chooseRepository: "spire:choose-repository",
   saveGraph: "spire:save-graph",
   startRun: "spire:start-run",

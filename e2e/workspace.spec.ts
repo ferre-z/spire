@@ -1,199 +1,175 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   launchApp,
   setWindowSize,
-  tabButton,
-  waitForLayoutSave,
   type LaunchedApp,
 } from "./fixtures";
-import { seedGraph } from "./seed";
+import { mockPlan, mockRun, seedGraph } from "./seed";
 
-const DESKTOP = { width: 1440, height: 900 };
-const COMPACT = { width: 1024, height: 700 };
+const WIDE = { width: 1440, height: 900 } as const;
 
-let launched: LaunchedApp;
+let launched: LaunchedApp | undefined;
 
 test.afterEach(async () => {
   await launched?.close();
+  launched = undefined;
 });
 
-async function launchDesktop(options?: Parameters<typeof launchApp>[0]) {
+async function launchWide(
+  options?: Parameters<typeof launchApp>[0],
+): Promise<LaunchedApp> {
   launched = await launchApp(options);
-  await setWindowSize(launched.app, DESKTOP.width, DESKTOP.height);
-  await launched.page.waitForSelector('.workspace-dock[data-layout-mode="desktop"]');
+  await setWindowSize(launched.app, WIDE.width, WIDE.height);
+  await launched.page.locator(".workspace-shell").waitFor();
   return launched;
 }
 
-test.describe("window sizes", () => {
-  const sizes = [
-    { width: 800, height: 600, mode: "compact" },
-    { width: 1024, height: 700, mode: "compact" },
-    { width: 1440, height: 900, mode: "desktop" },
-    { width: 1920, height: 1080, mode: "desktop" },
-  ];
+function canvasNode(page: Page, nodeId: string) {
+  return page.locator(`.react-flow__node[data-id="${nodeId}"]`);
+}
 
-  for (const size of sizes) {
-    test(`renders the ${size.mode} workspace at ${size.width}x${size.height}`, async () => {
+test.describe("fixed workspace shell", () => {
+  test("completes onboarding from a discovered harness and model without credentials", async () => {
+    launched = await launchApp({ onboardingComplete: false, graphsV2: [] });
+    const { page } = launched;
+    await expect(page.locator(".onboarding-panel")).toBeVisible();
+    await expect(page.getByText(/API key|credential/i)).toHaveCount(0);
+    await page.getByRole("radio", { name: /OpenCode/ }).click();
+    await page.getByRole("radio", { name: /Fixture Model/ }).check();
+    await page.getByRole("button", { name: "Enter Spire" }).click();
+    await expect(page.locator(".workspace-shell")).toBeVisible();
+    await expect(page.locator(".titlebar-context")).toContainText("Build & Review");
+  });
+
+  for (const size of [
+    { width: 800, height: 600 },
+    { width: 1024, height: 700 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ]) {
+    test(`fits fixed regions at ${size.width}x${size.height}`, async () => {
       launched = await launchApp();
       await setWindowSize(launched.app, size.width, size.height);
       const { page } = launched;
-      await page.waitForSelector(
-        `.workspace-dock[data-layout-mode="${size.mode}"]`,
-      );
-      // All ten panes are present as tabs in both modes.
-      for (const title of [
-        "Graph Library",
-        "Run History",
-        "Graph Canvas",
-        "Task Launcher",
-        "Graph Settings",
-        "Node Inspector",
-        "Runtime Policy",
-        "Live Stream",
-        "Diff",
-        "Result",
-      ]) {
-        await expect(tabButton(page, title)).toBeVisible();
-      }
-      // Canvas pane content is rendered and fits the viewport.
-      const canvas = page.locator('[data-pane="graph-canvas"]');
-      await expect(canvas).toBeVisible();
-      const box = await canvas.boundingBox();
-      expect(box).not.toBeNull();
-      expect(box!.width).toBeGreaterThan(100);
-      expect(box!.x + box!.width).toBeLessThanOrEqual(size.width + 1);
+      await page.locator(".workspace-shell").waitFor();
+
+      await expect(page.getByRole("navigation", { name: "Activity destinations" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Graph canvas" })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Output utilities" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Launch graph" })).toBeVisible();
+      await expect(page.getByLabel("Launch goal")).toBeVisible();
+
+      const overflow = await page.evaluate(() => ({
+        horizontal: document.documentElement.scrollWidth - window.innerWidth,
+        vertical: document.documentElement.scrollHeight - window.innerHeight,
+      }));
+      expect(overflow).toEqual({ horizontal: 0, vertical: 0 });
     });
   }
-});
 
-test.describe("pane management", () => {
-  test("closes and reopens a pane through the View menu", async () => {
-    const { page } = await launchDesktop();
-    const result = tabButton(page, "Result");
-    await result.hover();
-    await result.locator(".flexlayout__tab_button_trailing").click();
-    await expect(tabButton(page, "Result")).toHaveCount(0);
+  test("activates Run History and switches utility drawers", async () => {
+    const graph = seedGraph("graph-alpha", "Build & Review");
+    const run = mockRun(graph);
+    const plan = mockPlan(graph, run);
+    const { page } = await launchWide({
+      graphsV2: [graph],
+      runs: [run],
+      plans: [plan],
+    });
 
-    await page.locator(".titlebar-view").click();
-    await page.getByRole("menuitem", { name: "Result" }).click();
-    await expect(tabButton(page, "Result")).toBeVisible();
+    await page.getByRole("button", { name: "Run History" }).click();
+    const history = page.locator('[data-pane="run-history"]');
+    await expect(history).toBeVisible();
+    await history.getByRole("button", { name: new RegExp(run.goal) }).click();
+    await expect(history.locator(".run-list-item.selected")).toContainText(run.goal);
+
+    await page.getByRole("button", { name: "Diff" }).click();
+    await expect(page.getByRole("dialog", { name: "Diff" })).toBeVisible();
+    await page
+      .getByRole("dialog", { name: "Diff" })
+      .getByRole("button", { name: "Result", exact: true })
+      .click();
+    await expect(page.getByRole("dialog", { name: "Result" })).toBeVisible();
+    await page.getByRole("button", { name: "Close Result" }).click();
+    await expect(page.getByRole("dialog", { name: "Result" })).toHaveCount(0);
   });
 
-  test("reopens a pane through the command menu with the keyboard", async () => {
-    const { page } = await launchDesktop();
-    const diff = tabButton(page, "Diff");
-    await diff.hover();
-    await diff.locator(".flexlayout__tab_button_trailing").click();
-    await expect(tabButton(page, "Diff")).toHaveCount(0);
+  test("retains live node edits across close and reopen, then saves a version", async () => {
+    const { page } = await launchWide();
+    const planner = canvasNode(page, "planner");
+    await planner.click();
+    const dialog = page.getByRole("dialog", { name: /Architect/ });
+    await expect(dialog).toBeVisible();
 
+    await dialog.getByLabel("Node name").fill("Architecture Lead");
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+
+    await canvasNode(page, "planner").click();
+    const reopened = page.getByRole("dialog", { name: /Architecture Lead/ });
+    await expect(reopened.getByLabel("Node name")).toHaveValue("Architecture Lead");
+    await reopened.getByRole("button", { name: "Save version" }).click();
+    await expect(page.locator(".titlebar-context")).toContainText("v2");
+  });
+
+  test("shows canvas controls and minimap, selects a node, and persists a drag", async () => {
+    const { page } = await launchWide();
+    await expect(page.locator(".react-flow__controls")).toBeVisible();
+    await expect(page.locator(".react-flow__minimap")).toBeVisible();
+
+    const builder = canvasNode(page, "implementer");
+    const before = await builder.boundingBox();
+    expect(before).not.toBeNull();
+    if (!before) return;
+
+    await builder.click();
+    await expect(builder.locator(".canvas-node")).toHaveClass(/is-selected/);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(before.x + before.width / 2 + 120, before.y + before.height / 2 + 70, {
+      steps: 8,
+    });
+    await page.mouse.up();
+    await expect.poll(async () => (await builder.boundingBox())?.x).toBeGreaterThan(before.x + 60);
+  });
+
+  test("supports command and major-region keyboard navigation with reduced motion", async () => {
+    const { page } = await launchWide();
     await page.keyboard.press("Control+k");
-    await expect(page.locator(".command-menu")).toBeVisible();
-    await page.keyboard.type("Reopen Diff");
-    await page.keyboard.press("Enter");
-    await expect(tabButton(page, "Diff")).toBeVisible();
-    await expect(page.locator(".command-menu")).toHaveCount(0);
-  });
+    await expect(page.getByRole("dialog", { name: "Spire commands" })).toBeVisible();
+    await page.keyboard.press("Escape");
 
-  test("maximizes and restores the active pane", async () => {
-    const { page } = await launchDesktop();
-    await tabButton(page, "Graph Canvas").click();
-    await page.locator(".titlebar-view").click();
-    await page.getByRole("menuitem", { name: "Maximize" }).click();
-    await expect(page.locator(".flexlayout__tabset-maximized")).toHaveCount(1);
-    await page.locator(".titlebar-view").click();
-    await page.getByRole("menuitem", { name: "Restore" }).click();
-    await expect(page.locator(".flexlayout__tabset-maximized")).toHaveCount(0);
-  });
-
-  test("moves the active pane into another tab group", async () => {
-    const { page } = await launchDesktop();
-    await tabButton(page, "Diff").click();
-    await page.locator(".titlebar-view").click();
-    await page.getByRole("menuitem", { name: "Move up" }).click();
-    // Diff now shares the upper-right tabset with the config panes.
-    await tabButton(page, "Node Inspector").click();
-    await expect(tabButton(page, "Diff")).toBeVisible();
-    const diffBox = await tabButton(page, "Diff").boundingBox();
-    const inspectorBox = await tabButton(page, "Node Inspector").boundingBox();
-    expect(Math.abs(diffBox!.y - inspectorBox!.y)).toBeLessThan(4);
-  });
-
-  test("resets the layout to defaults", async () => {
-    const { page } = await launchDesktop();
-    const result = tabButton(page, "Result");
-    await result.hover();
-    await result.locator(".flexlayout__tab_button_trailing").click();
-    await expect(tabButton(page, "Result")).toHaveCount(0);
-    await waitForLayoutSave(page);
-
-    await page.locator(".titlebar-view").click();
-    await page.getByRole("menuitem", { name: "Reset layout" }).click();
-    await expect(tabButton(page, "Result")).toBeVisible();
-  });
-
-  test("cycles panes with F6 and Shift+F6", async () => {
-    const { page } = await launchDesktop();
-    // Make the config tabset active with Node Inspector selected.
-    await tabButton(page, "Node Inspector").click();
-    // F6 moves to the next pane in model order (Runtime Policy).
     await page.keyboard.press("F6");
-    await expect(tabButton(page, "Runtime Policy")).toHaveClass(
-      /flexlayout__tab_button--selected/,
-    );
-    // Shift+F6 cycles back.
+    await expect(page.getByRole("navigation", { name: "Activity destinations" })).toBeFocused();
+    await page.keyboard.press("F6");
+    await expect(page.getByRole("complementary", { name: "Graph navigation" })).toBeFocused();
     await page.keyboard.press("Shift+F6");
-    await expect(tabButton(page, "Node Inspector")).toHaveClass(
-      /flexlayout__tab_button--selected/,
+    await expect(page.getByRole("navigation", { name: "Activity destinations" })).toBeFocused();
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const node = page.locator(".agent-node, .canvas-node").first();
+    await node.hover();
+    const animationName = await node.evaluate((element) =>
+      getComputedStyle(element, "::before").animationName,
     );
-  });
-});
-
-test.describe("layout persistence", () => {
-  test("keeps compact and desktop layouts independent across the breakpoint", async () => {
-    const { app, page } = await launchDesktop();
-    // Close Result in desktop mode and let the save flush.
-    const result = tabButton(page, "Result");
-    await result.hover();
-    await result.locator(".flexlayout__tab_button_trailing").click();
-    await expect(tabButton(page, "Result")).toHaveCount(0);
-    await waitForLayoutSave(page);
-
-    // Cross into compact: Result is still open there.
-    await setWindowSize(app, COMPACT.width, COMPACT.height);
-    await page.waitForSelector('.workspace-dock[data-layout-mode="compact"]');
-    await expect(tabButton(page, "Result")).toBeVisible();
-
-    // Close Result in compact too, then go back to desktop: still closed.
-    const compactResult = tabButton(page, "Result");
-    await compactResult.hover();
-    await compactResult.locator(".flexlayout__tab_button_trailing").click();
-    await waitForLayoutSave(page);
-    await setWindowSize(app, DESKTOP.width, DESKTOP.height);
-    await page.waitForSelector('.workspace-dock[data-layout-mode="desktop"]');
-    await expect(tabButton(page, "Result")).toHaveCount(0);
-    await expect(tabButton(page, "Graph Canvas")).toBeVisible();
+    expect(animationName).toBe("none");
   });
 
-  test("persists layouts per graph across graph switches", async () => {
-    const alpha = seedGraph("graph-alpha", "Alpha Graph");
-    const beta = seedGraph("graph-beta", "Beta Graph");
-    const { page } = await launchDesktop({ graphs: [alpha, beta] });
-
-    // Close Result in the first graph, then switch graphs.
-    const result = tabButton(page, "Result");
-    await result.hover();
-    await result.locator(".flexlayout__tab_button_trailing").click();
-    await expect(tabButton(page, "Result")).toHaveCount(0);
-    await waitForLayoutSave(page);
-
-    await page.getByRole("button", { name: /Beta Graph/ }).click();
-    await expect(page.locator(".titlebar-context")).toContainText("Beta Graph");
-    // Beta has its own default layout with Result open.
-    await expect(tabButton(page, "Result")).toBeVisible();
-
-    await page.getByRole("button", { name: /Alpha Graph/ }).click();
-    await expect(page.locator(".titlebar-context")).toContainText("Alpha Graph");
-    // Alpha's layout was restored without Result.
-    await expect(tabButton(page, "Result")).toHaveCount(0);
+  test("keeps external and cross-origin windows blocked", async () => {
+    const { page } = await launchWide();
+    const results = await page.evaluate(() => ({
+      external: window.open("https://example.com") === null,
+      crossOrigin: window.open("http://localhost:3999/index.html") === null,
+      otherFile: window.open("file:///etc/passwd") === null,
+      otherPage: window.open(new URL("index.html", window.location.href).toString()) === null,
+    }));
+    expect(results).toEqual({
+      external: true,
+      crossOrigin: true,
+      otherFile: true,
+      otherPage: true,
+    });
   });
 });

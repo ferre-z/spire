@@ -1,360 +1,243 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import {
   Bot,
   Box,
-  BrainCircuit,
+  Circle,
   CircleCheck,
+  CircleX,
+  Clock3,
+  ChevronDown,
+  ChevronRight,
   FolderGit2,
   GitBranch,
   LoaderCircle,
+  MinusCircle,
 } from "lucide-react";
-import type { LegacyAgentNode as AgentNodeType, RunStatus } from "../../shared/domain";
-import type { GraphNode } from "../../shared/domain";
-import type { GraphGroup } from "../../shared/domain";
+import type { GraphGroup, GraphNode } from "../../shared/domain";
 import type { NodeExecution, NodeExecutionStatus } from "../../shared/execution";
+import { useAppStore } from "../store";
 
-export type AgentFlowNode = Node<{
-  agent: AgentNodeType;
-  active: boolean;
-  runStatus?: RunStatus;
-  iteration?: number;
-}, "legacy-agent">;
-
-/** Data carried by every v2 canvas node. */
 export type CanvasNodeData = {
-  node: GraphNode;
-  execution?: NodeExecution;
-  active: boolean;
+  readonly node: GraphNode;
+  readonly execution?: NodeExecution;
+  readonly active: boolean;
 };
 
 export type CanvasNode = Node<CanvasNodeData>;
 
-/** Data carried by v2 group nodes. */
 export type GroupNodeData = {
-  group: GraphGroup;
-  childCount: number;
-  collapsed: boolean;
+  readonly group: GraphGroup;
+  readonly childCount: number;
+  readonly collapsed: boolean;
 };
 
 export type GroupNode = Node<GroupNodeData>;
 
-/** Map a node execution status to a CSS color token. */
-export function nodeStatusColor(status: NodeExecutionStatus): string {
+type StatusMetadata = {
+  readonly tone: "neutral" | "running" | "waiting" | "success" | "failed";
+  readonly label: string;
+};
+
+export function nodeStatusMetadata(status: NodeExecutionStatus): StatusMetadata {
   switch (status) {
-    case "succeeded":
-      return "var(--green)";
-    case "failed":
-      return "var(--red)";
+    case "queued":
+      return { tone: "neutral", label: "Queued" };
     case "running":
-      return "var(--orange)";
-    case "cancelled":
-      return "var(--red)";
-    case "skipped":
-      return "var(--text-3)";
+      return { tone: "running", label: "Running" };
     case "waiting":
-      return "var(--amber)";
-    default:
-      return "var(--blue)";
+      return { tone: "waiting", label: "Waiting" };
+    case "succeeded":
+      return { tone: "success", label: "Succeeded" };
+    case "failed":
+      return { tone: "failed", label: "Failed" };
+    case "skipped":
+      return { tone: "neutral", label: "Skipped" };
+    case "cancelled":
+      return { tone: "failed", label: "Cancelled" };
   }
 }
 
-/** Map a v2 node kind to a CSS color token. */
-export function kindColor(kind: GraphNode["kind"]): string {
-  switch (kind) {
-    case "agent":
-      return "var(--blue)";
-    case "decision":
-      return "var(--amber)";
-    case "checkpoint":
-      return "var(--orange)";
-    case "subgraph":
-      return "#a78f75";
-    default:
-      return "var(--blue)";
-  }
-}
-
-const KIND_ICON: Record<GraphNode["kind"], ReactNode> = {
+const KIND_ICON: Readonly<Record<GraphNode["kind"], ReactNode>> = {
   agent: <Bot size={15} />,
   decision: <GitBranch size={15} />,
   checkpoint: <CircleCheck size={15} />,
   subgraph: <FolderGit2 size={15} />,
 };
 
-const KIND_LABEL: Record<GraphNode["kind"], string> = {
-  agent: "AGENT",
-  decision: "DECISION",
-  checkpoint: "CHECKPOINT",
-  subgraph: "SUBGRAPH",
+const KIND_LABEL: Readonly<Record<GraphNode["kind"], string>> = {
+  agent: "Agent",
+  decision: "Decision",
+  checkpoint: "Checkpoint",
+  subgraph: "Subgraph",
 };
 
-const EDGE_STATUS_COLOR: Record<NodeExecutionStatus, string> = {
-  queued: "#4a5160",
-  running: "var(--orange)",
-  waiting: "var(--amber)",
-  succeeded: "var(--green)",
-  failed: "var(--red)",
-  skipped: "#4a5160",
-  cancelled: "#4a5160",
+const STATUS_ICON: Readonly<Record<NodeExecutionStatus, ReactNode>> = {
+  queued: <Circle size={12} />,
+  running: <LoaderCircle className="spin" size={12} />,
+  waiting: <Clock3 size={12} />,
+  succeeded: <CircleCheck size={12} />,
+  failed: <CircleX size={12} />,
+  skipped: <MinusCircle size={12} />,
+  cancelled: <CircleX size={12} />,
 };
 
-/** Shared rendering for the canvas node body (name + description + meta). */
-function NodeBody({
-  icon,
-  label,
-  title,
-  subtitle,
-  status,
-  attempts,
-}: {
-  icon: ReactNode;
-  label: string;
-  title: string;
-  subtitle?: string;
-  status?: NodeExecutionStatus;
-  attempts?: number;
-}) {
-  const statusColor = status ? EDGE_STATUS_COLOR[status] : undefined;
+function StatusMarker({ status }: { readonly status: NodeExecutionStatus }) {
+  const metadata = nodeStatusMetadata(status);
+  return (
+    <span
+      className={`canvas-node-status status--${metadata.tone}`}
+      aria-label={`Execution status: ${metadata.label}`}
+    >
+      {STATUS_ICON[status]}
+      <span>{metadata.label}</span>
+    </span>
+  );
+}
+
+type NodeBodyProps = {
+  readonly node: GraphNode;
+  readonly subtitle?: string;
+  readonly execution?: NodeExecution;
+  readonly meta?: string;
+};
+
+function NodeBody({ node, subtitle, execution, meta }: NodeBodyProps) {
   return (
     <>
       <div className="canvas-node-header">
-        <span
-          className="canvas-node-icon"
-          style={{ color: statusColor }}
-        >
-          {icon}
-        </span>
-        <span className="canvas-node-label">{label}</span>
-        {status && status !== "queued" && (
-          <span className="canvas-node-dot" style={{ background: statusColor }} />
-        )}
+        <span className="canvas-node-icon">{KIND_ICON[node.kind]}</span>
+        <span className="canvas-node-label">{KIND_LABEL[node.kind]}</span>
+        {execution ? <StatusMarker status={execution.status} /> : null}
       </div>
       <div className="canvas-node-title">
-        <h3>{title}</h3>
-        {attempts !== undefined && attempts > 0 ? (
-          <span className="canvas-node-attempts">pass {attempts}</span>
+        <h3 title={node.name}>{node.name}</h3>
+        {execution && execution.visits > 0 ? (
+          <span className="canvas-node-attempts">pass {execution.visits}</span>
         ) : null}
       </div>
       {subtitle ? <p className="canvas-node-subtitle">{subtitle}</p> : null}
+      {meta ? <div className="canvas-node-meta" title={meta}>{meta}</div> : null}
     </>
   );
 }
 
-export function V2AgentNode({ data, selected }: NodeProps<CanvasNode>) {
+function nodeClassName(kind: GraphNode["kind"], active: boolean, selected: boolean): string {
+  return [
+    "canvas-node",
+    `canvas-node--${kind}`,
+    active ? "is-running" : "",
+    selected ? "is-selected" : "",
+  ].filter(Boolean).join(" ");
+}
+
+function V2AgentNodeView({ data, selected }: NodeProps<CanvasNode>) {
   const { node, execution, active } = data;
   if (node.kind !== "agent") return null;
   return (
-    <div
-      className={`canvas-node canvas-node--agent canvas-node--${node.kind} ${active ? "is-running" : ""} ${selected ? "is-selected" : ""}`}
-    >
-      <Handle
-        id="left-target"
-        type="target"
-        position={Position.Left}
-        className="node-handle"
-      />
-      <Handle
-        id="right-source"
-        type="source"
-        position={Position.Right}
-        className="node-handle"
-      />
-      <Handle
-        id="top-target"
-        type="target"
-        position={Position.Top}
-        className="node-handle secondary-handle"
-      />
-      <Handle
-        id="top-source"
-        type="source"
-        position={Position.Top}
-        className="node-handle secondary-handle"
-      />
-      <Handle
-        id="bottom-target"
-        type="target"
-        position={Position.Bottom}
-        className="node-handle secondary-handle"
-      />
-      <Handle
-        id="bottom-source"
-        type="source"
-        position={Position.Bottom}
-        className="node-handle secondary-handle"
-      />
-      <NodeBody
-        icon={KIND_ICON.agent}
-        label={KIND_LABEL.agent}
-        title={node.name}
-        subtitle={node.job}
-        status={execution?.status}
-        attempts={execution?.visits}
-      />
-      <div className="canvas-node-meta">
-        <span>{node.modelId.split("/").slice(-1)[0] || "—"}</span>
-        {active && <LoaderCircle className="spin" size={12} />}
-      </div>
-      {active && <div className="node-progress" />}
+    <div className={nodeClassName(node.kind, active, selected)}>
+      <Handle id="left-target" type="target" position={Position.Left} className="node-handle node-handle--incoming" />
+      <Handle id="right-source" type="source" position={Position.Right} className="node-handle node-handle--outgoing" />
+      <Handle id="top-target" type="target" position={Position.Top} className="node-handle node-handle--incoming secondary-handle" />
+      <Handle id="top-source" type="source" position={Position.Top} className="node-handle node-handle--outgoing secondary-handle" />
+      <Handle id="bottom-target" type="target" position={Position.Bottom} className="node-handle node-handle--incoming secondary-handle" />
+      <Handle id="bottom-source" type="source" position={Position.Bottom} className="node-handle node-handle--outgoing secondary-handle" />
+      <NodeBody node={node} subtitle={node.job} execution={execution} meta={node.modelId} />
     </div>
   );
 }
 
-export function V2DecisionNode({ data, selected }: NodeProps<CanvasNode>) {
+function V2DecisionNodeView({ data, selected }: NodeProps<CanvasNode>) {
   const { node, execution, active } = data;
   if (node.kind !== "decision") return null;
   return (
-    <div
-      className={`canvas-node canvas-node--decision canvas-node--${node.kind} ${active ? "is-running" : ""} ${selected ? "is-selected" : ""}`}
-    >
-      <Handle type="target" position={Position.Top} className="node-handle" />
-      <Handle type="source" position={Position.Right} className="node-handle" />
-      <Handle type="source" position={Position.Bottom} className="node-handle secondary-handle" />
-      <NodeBody
-        icon={KIND_ICON.decision}
-        label={KIND_LABEL.decision}
-        title={node.name}
-        subtitle={node.job}
-        status={execution?.status}
-        attempts={execution?.visits}
-      />
-      <div className="canvas-node-meta">
-        <span>{node.activation}</span>
-      </div>
+    <div className={nodeClassName(node.kind, active, selected)}>
+      <Handle type="target" position={Position.Top} className="node-handle node-handle--incoming" />
+      <Handle type="source" position={Position.Right} className="node-handle node-handle--outgoing" />
+      <Handle type="source" position={Position.Bottom} className="node-handle node-handle--outgoing secondary-handle" />
+      <NodeBody node={node} subtitle={node.job} execution={execution} meta={node.modelId} />
     </div>
   );
 }
 
-export function V2CheckpointNode({ data, selected }: NodeProps<CanvasNode>) {
+function V2CheckpointNodeView({ data, selected }: NodeProps<CanvasNode>) {
   const { node, execution, active } = data;
   if (node.kind !== "checkpoint") return null;
   return (
-    <div
-      className={`canvas-node canvas-node--checkpoint canvas-node--${node.kind} ${active ? "is-running" : ""} ${selected ? "is-selected" : ""}`}
-    >
-      <Handle type="target" position={Position.Top} className="node-handle" />
-      <Handle type="source" position={Position.Bottom} className="node-handle" />
-      <NodeBody
-        icon={KIND_ICON.checkpoint}
-        label={KIND_LABEL.checkpoint}
-        title={node.name}
-        subtitle={`Mode: ${node.mode}`}
-        status={execution?.status}
-        attempts={execution?.visits}
-      />
+    <div className={nodeClassName(node.kind, active, selected)}>
+      <Handle type="target" position={Position.Top} className="node-handle node-handle--incoming" />
+      <Handle type="source" position={Position.Bottom} className="node-handle node-handle--outgoing" />
+      <NodeBody node={node} subtitle={`Mode: ${node.mode}`} execution={execution} />
     </div>
   );
 }
 
-export function V2SubgraphNode({ data, selected }: NodeProps<CanvasNode>) {
+function V2SubgraphNodeView({ data, selected }: NodeProps<CanvasNode>) {
   const { node, execution, active } = data;
   if (node.kind !== "subgraph") return null;
   return (
-    <div
-      className={`canvas-node canvas-node--subgraph canvas-node--${node.kind} ${active ? "is-running" : ""} ${selected ? "is-selected" : ""}`}
-    >
-      <Handle type="target" position={Position.Left} className="node-handle" />
-      <Handle type="source" position={Position.Right} className="node-handle" />
-      <NodeBody
-        icon={KIND_ICON.subgraph}
-        label={KIND_LABEL.subgraph}
-        title={node.name}
-        subtitle={node.graphId}
-        status={execution?.status}
-        attempts={execution?.visits}
-      />
+    <div className={nodeClassName(node.kind, active, selected)}>
+      <Handle type="target" position={Position.Left} className="node-handle node-handle--incoming" />
+      <Handle type="source" position={Position.Right} className="node-handle node-handle--outgoing" />
+      <NodeBody node={node} subtitle={node.graphId} execution={execution} />
     </div>
   );
 }
 
-export function V2GroupNode({ data, selected }: NodeProps<GroupNode>) {
+function V2GroupNodeView({ data, selected }: NodeProps<GroupNode>) {
   const { group, childCount, collapsed } = data;
+  const collapseGroup = useAppStore((state) => state.collapseGroup);
+  const action = collapsed ? "Expand" : "Collapse";
   return (
-    <div
-      className={`canvas-node canvas-node--group ${collapsed ? "is-collapsed" : ""} ${selected ? "is-selected" : ""}`}
-    >
-      <Handle type="target" position={Position.Top} className="node-handle" />
-      <Handle type="source" position={Position.Bottom} className="node-handle" />
-      <Handle type="source" position={Position.Right} className="node-handle" />
+    <div className={`canvas-node canvas-node--group ${collapsed ? "is-collapsed" : ""} ${selected ? "is-selected" : ""}`}>
+      <Handle type="target" position={Position.Top} className="node-handle node-handle--incoming" />
+      <Handle type="source" position={Position.Bottom} className="node-handle node-handle--outgoing" />
+      <Handle type="source" position={Position.Right} className="node-handle node-handle--outgoing" />
       <div className="canvas-node-header">
-        <Box size={15} />
-        <span className="canvas-node-label">GROUP</span>
+        <span className="canvas-node-icon"><Box size={15} /></span>
+        <span className="canvas-node-label">Group</span>
+        <strong className="canvas-group-name" title={group.name}>{group.name}</strong>
+        <span className="canvas-group-count">{childCount}</span>
+        <button
+          type="button"
+          className="canvas-group-toggle nodrag nopan"
+          aria-expanded={!collapsed}
+          aria-label={`${action} ${group.name}`}
+          title={`${action} ${group.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            collapseGroup(group.id);
+          }}
+        >
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+        </button>
       </div>
-      <h3>{group.name}</h3>
-      <p className="canvas-node-subtitle">{childCount} node{childCount !== 1 ? "s" : ""}</p>
     </div>
   );
 }
 
-/** Legacy v1 agent node — preserved for backward compatibility. */
-export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
-  const { agent, active, runStatus, iteration } = data;
-  const planner = agent.role === "planner";
-  const finished = runStatus === "succeeded";
-  return (
-    <div
-      className={`agent-node liquid-border agent-${agent.role} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}`}
-    >
-      <Handle
-        id="left-target"
-        type="target"
-        position={Position.Left}
-        className="node-handle"
-      />
-      <Handle
-        id="right-source"
-        type="source"
-        position={Position.Right}
-        className="node-handle"
-      />
-      <Handle
-        id="top-target"
-        type="target"
-        position={Position.Top}
-        className="node-handle secondary-handle"
-      />
-      <Handle
-        id="top-source"
-        type="source"
-        position={Position.Top}
-        className="node-handle secondary-handle"
-      />
-      <Handle
-        id="bottom-target"
-        type="target"
-        position={Position.Bottom}
-        className="node-handle secondary-handle"
-      />
-      <Handle
-        id="bottom-source"
-        type="source"
-        position={Position.Bottom}
-        className="node-handle secondary-handle"
-      />
-      <div className="node-topline">
-        <span className="node-role">
-          {planner ? <BrainCircuit size={15} /> : <Bot size={15} />}
-          {agent.role}
-        </span>
-        <span className="node-state">
-          {active ? (
-            <LoaderCircle className="spin" size={14} />
-          ) : finished ? (
-            <CircleCheck size={14} />
-          ) : (
-            <span className="idle-dot" />
-          )}
-          {active ? "running" : finished ? "complete" : "ready"}
-        </span>
-      </div>
-      <h3>{agent.name}</h3>
-      <p>{planner ? "Plans, evaluates, routes" : "Builds, tests, reports"}</p>
-      <div className="node-meta">
-        <span>{agent.model.split("/").slice(-1)[0]}</span>
-        {active && iteration ? <span>PASS {iteration}</span> : <span>OPENCODE</span>}
-      </div>
-      {active && <div className="node-progress" />}
-    </div>
-  );
+function canvasNodePropsEqual(
+  previous: NodeProps<CanvasNode>,
+  next: NodeProps<CanvasNode>,
+): boolean {
+  return previous.selected === next.selected
+    && previous.data.node === next.data.node
+    && previous.data.execution === next.data.execution
+    && previous.data.active === next.data.active;
 }
+
+function groupNodePropsEqual(
+  previous: NodeProps<GroupNode>,
+  next: NodeProps<GroupNode>,
+): boolean {
+  return previous.selected === next.selected
+    && previous.data.group === next.data.group
+    && previous.data.childCount === next.data.childCount
+    && previous.data.collapsed === next.data.collapsed;
+}
+
+export const V2AgentNode = memo(V2AgentNodeView, canvasNodePropsEqual);
+export const V2DecisionNode = memo(V2DecisionNodeView, canvasNodePropsEqual);
+export const V2CheckpointNode = memo(V2CheckpointNodeView, canvasNodePropsEqual);
+export const V2SubgraphNode = memo(V2SubgraphNodeView, canvasNodePropsEqual);
+export const V2GroupNode = memo(V2GroupNodeView, groupNodePropsEqual);

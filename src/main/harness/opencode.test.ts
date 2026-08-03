@@ -41,11 +41,16 @@ type FakeServer = EventEmitter & {
   kill: ReturnType<typeof vi.fn>;
 };
 
-function fakeServerProcess(): FakeServer {
+function fakeServerProcess(exitOnTerminate = true): FakeServer {
   const proc = new EventEmitter() as FakeServer;
   proc.stdout = new EventEmitter();
   proc.stderr = new EventEmitter();
-  proc.kill = vi.fn();
+  proc.kill = vi.fn(() => {
+    if (exitOnTerminate) {
+      queueMicrotask(() => proc.emit("exit", 0, "SIGTERM"));
+    }
+    return true;
+  });
   queueMicrotask(() => {
     proc.stdout.emit(
       "data",
@@ -330,6 +335,31 @@ describe("OpenCodeAdapter", () => {
     await adapter.run(runInput());
     await adapter.close();
     expect(server.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("waits for process exit after force-killing an unresponsive server", async () => {
+    let stubbornServer: FakeServer | undefined;
+    mocks.spawn.mockImplementationOnce(() => {
+      stubbornServer = fakeServerProcess(false);
+      return stubbornServer;
+    });
+    const adapter = new OpenCodeAdapter();
+    await adapter.run(runInput());
+    if (!stubbornServer) throw new Error("Expected the OpenCode server to spawn.");
+
+    let closed = false;
+    const closing = adapter.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    expect(stubbornServer.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
+    expect(stubbornServer.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+    expect(closed).toBe(false);
+
+    stubbornServer.emit("exit", null, "SIGKILL");
+    await closing;
+    expect(closed).toBe(true);
   });
 });
 

@@ -180,7 +180,7 @@ async function launchAppWithPath(
     timeout: 60_000,
   });
   const page = await app.firstWindow();
-  await page.waitForSelector(".flexlayout__layout, .onboarding-shell", {
+  await page.waitForSelector(".workspace-shell, .onboarding-shell", {
     timeout: 30_000,
   });
   return {
@@ -313,7 +313,7 @@ test("drives a full run lifecycle: start, traces, stop, retry, artifacts, cleanu
   const repo = makeScratchRepo();
   try {
     launched = await launchAppWithPath(shim, {
-      graphs: [seedGraph("graph-alpha", "Build & Review")],
+      graphsV2: [seedGraph("graph-alpha", "Build & Review")],
     });
     await waitForControlSocket(launched.userDataDir);
     session = await connectSidecar(launched.userDataDir);

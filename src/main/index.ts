@@ -11,6 +11,7 @@ import { RunEngine } from "./run-engine";
 import { isAllowedPopoutUrl } from "./window-policy";
 import { LocalWorktreeBackend } from "./worktree";
 import type { GraphDefinition, GraphDefinitionV2, HarnessId, RunRecord } from "../shared/domain";
+import type { ExecutionPlan } from "../shared/execution";
 import type { HarnessRegistry } from "../shared/harness";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -19,6 +20,7 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 let mainWindow: BrowserWindow | null = null;
 let database: SpireDatabase | undefined;
 let harness: OpenCodeHarness | undefined;
+let harnessRegistry: HarnessRegistry | undefined;
 let controlSocket: ControlSocketServer | undefined;
 let shutdownStarted = false;
 
@@ -34,6 +36,7 @@ type SeedFixture = {
   graphs?: GraphDefinition[];
   graphsV2?: GraphDefinitionV2[];
   runs?: RunRecord[];
+  plans?: ExecutionPlan[];
   harnessFixtures?: Record<string, FixtureHarnessConfig>;
 };
 
@@ -56,6 +59,7 @@ function seedFromFixture(
     for (const graph of fixture.graphs ?? []) database.saveGraph(graph);
     for (const graph of fixture.graphsV2 ?? []) database.saveGraphV2(graph);
     for (const run of fixture.runs ?? []) database.saveRun(run);
+    for (const plan of fixture.plans ?? []) database.saveExecutionPlan(plan);
     return fixture;
   } catch (error) {
     console.error("Failed to apply SPIRE_SEED fixture:", error);
@@ -154,6 +158,7 @@ void app.whenReady().then(async () => {
   } else {
     registry = createDefaultHarnessRegistry(dataRoot);
   }
+  harnessRegistry = registry;
   const backend = new LocalWorktreeBackend(path.join(dataRoot, "worktrees"));
   const journal = database.createTraceJournal();
   const engine = new RunEngine(
@@ -192,18 +197,13 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-  // The control socket closes before the database: before-quit is
-  // synchronous, so defer the quit once while the socket shuts down.
-  if (controlSocket && !shutdownStarted) {
+  if (!shutdownStarted && (controlSocket || harnessRegistry)) {
     shutdownStarted = true;
     event.preventDefault();
-    void controlSocket
-      .close()
-      // Quit even if socket teardown fails — never hang shutdown.
-      .then(
-        () => app.quit(),
-        () => app.quit(),
-      );
+    const shutdownTasks: Promise<unknown>[] = [];
+    if (controlSocket) shutdownTasks.push(controlSocket.close());
+    if (harnessRegistry) shutdownTasks.push(harnessRegistry.closeAll());
+    void Promise.allSettled(shutdownTasks).then(() => app.quit());
     return;
   }
   harness?.close();

@@ -11,8 +11,8 @@
     "build:mcp": "vite build --config vite.mcp.config.ts",
     "spire:mcp": "pnpm build:mcp && node mcp-dist/mcp.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "NODE_ENV=test vitest run",
+    "test:watch": "NODE_ENV=test vitest",
     "test:e2e": "SPIRE_ALLOW_INSPECT=1 pnpm build && xvfb-run -a playwright test",
     "lint": "eslint ."
   },
@@ -32,7 +32,6 @@
     "class-variance-authority": "^0.7.1",
     "classcat": "^5.0.5",
     "clsx": "^2.1.1",
-    "flexlayout-react": "^0.8.0",
     "lucide-react": "^0.545.0",
     "nanoid": "^5.1.6",
     "react": "^19.2.0",
