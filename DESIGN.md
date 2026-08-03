@@ -4,7 +4,7 @@
 
 Spire is a dense, local-first orchestration workbench. The renderer uses quiet charcoal layers, crisp borders, and two semantic accents: blue for selection/input/navigation and orange for execution/output. It is deliberately solid and technical: no glass, liquid, glow, gradient wash, floating decoration, or ornamental motion.
 
-This contract covers onboarding, the fixed workspace shell, reusable controls, overlays, and dialogs. Existing graph-canvas internals remain a separate implementation surface.
+This contract covers onboarding, the fixed workspace shell, graph canvas, reusable controls, overlays, and dialogs.
 
 ## 1. Foundations
 
@@ -27,6 +27,8 @@ This contract covers onboarding, the fixed workspace shell, reusable controls, o
 Tinted semantic surfaces are mixed from the relevant accent with a charcoal surface; they never emit glow or bloom.
 
 Active renderer CSS consumes semantic aliases for interactive borders, selected surfaces, execution button states, status borders/text, scrims, and neutral shadows. Component rules do not introduce raw color literals outside the root token block. Layout geometry, spacing, and typography use named scale and shell-dimension tokens whenever values repeat across primitives or breakpoints.
+
+Canvas-specific aliases are `--canvas-grid-dot`, `--canvas-edge-idle`, `--canvas-minimap-node`, and `--canvas-minimap-mask`. Canvas geometry uses `--canvas-node-width` and `--canvas-minimap-width`. Incoming handles and selection use navigation blue; outgoing handles, active connections, and execution borders use execution orange.
 
 ### Typography
 
@@ -113,6 +115,10 @@ Right-side 440px overlay with scrim, labeled header, close action, bounded body 
 
 Centered modal for later node editing. Anatomy: title/description, bounded form body, cancel and primary actions. States: create, edit, submitting, validation error, backend error, and destructive confirmation. It shares the drawer scrim and z-40 modal layer. Implementation is intentionally deferred.
 
+### `CanvasNode` and `NodeToolCluster`
+
+`CanvasNode` is a neutral raised surface with compact kind icon, name, description, runtime metadata, and a text-plus-icon execution marker. States: default, hover, selected, running, selected-running, collapsed group, success, waiting, and failure. Names and model identifiers truncate safely without changing node geometry. `NodeToolCluster` is a vertical group of five 32px icon buttons for agent, decision, checkpoint, subgraph, and group creation. Each button has a visible native tooltip, accessible name, focus state, disabled state, and per-action loading state.
+
 ## 6. Onboarding flow
 
 On mount, Spire probes all supported local harnesses: OpenCode, Codex, and Claude Code. Stage one shows skeleton rows while probing, then installed, compatible, and connected status for every harness. Only connected harnesses are selectable. When none are ready, the primary recovery action is Re-scan; authentication remains CLI-owned and the UI contains no credential language or fields.
@@ -126,6 +132,5 @@ Navigation and context overlays retain the same content and accessible names as 
 ## 8. Accepted debt and handoff
 
 - NodeDialog is specified but deferred to the node-modal slice.
-- GraphCanvasPane is only hosted by the new shell; its node behavior and canvas internals are unchanged.
 - Legacy FlexLayout/layout persistence modules may remain temporarily, but the active renderer must not import or invoke them.
 - React diagnostics use a development-only `import.meta.env.DEV` dynamic import so production has no initialization side effect or runtime dependency.

@@ -8,6 +8,9 @@ const activeRules = stylesheet.slice(activeRulesStart);
 const modalRulesStart = stylesheet.indexOf(".node-dialog-overlay");
 const modalRulesEnd = stylesheet.indexOf("/* ---------- run panes", modalRulesStart);
 const modalRules = stylesheet.slice(modalRulesStart, modalRulesEnd);
+const canvasRulesStart = activeRules.indexOf(".graph-canvas");
+const canvasRulesEnd = activeRules.indexOf(".launch-dock", canvasRulesStart);
+const canvasRules = activeRules.slice(canvasRulesStart, canvasRulesEnd);
 
 describe("active renderer design contract", () => {
   it("routes active shell colors through semantic tokens", () => {
@@ -41,5 +44,16 @@ describe("active renderer design contract", () => {
     expect(modalRules).not.toMatch(
       /^[ \t]+(?:gap|padding|margin(?:-[a-z]+)?|border-radius|font(?:-size)?|line-height|letter-spacing|animation(?:-duration)?|transition(?:-duration)?|width|height|min-width|min-height|max-width|max-height)\s*:[^;}]*(?:\d+(?:\.\d+)?(?:px|em|ms))/im,
     );
+  });
+
+  it("uses a token-driven vertical canvas toolbar and semantic node states", () => {
+    expect(canvasRules).toContain("flex-direction: column");
+    expect(canvasRules).toContain(".node-handle--incoming");
+    expect(canvasRules).toContain(".node-handle--outgoing");
+    expect(canvasRules).toContain(".canvas-node-status.status--success");
+    expect(canvasRules).toContain(".canvas-node-status.status--waiting");
+    expect(canvasRules).toContain(".canvas-node-status.status--failed");
+    expect(canvasRules).not.toMatch(/#[\da-f]{3,8}|rgba?\(/i);
+    expect(canvasRules).not.toContain("animation:");
   });
 });
