@@ -36,6 +36,8 @@ Inter Variable is the interface face. JetBrains Mono Variable is reserved for id
 
 Spacing follows a 4px base unit. Common increments are 4, 8, 12, 16, 20, 24, and 32px. Radii are exactly 4px for compact controls/status, 6px for fields/buttons/cards, 8px for menus/panels, and 10px for drawers/dialogs.
 
+Interactive controls use the named 36px control-height token and the 44px coarse-pointer target token. NodeDialog viewport geometry, minimum/maximum bounds, textarea minimum height, shadow blur, type leading/tracking, and compact inset are named root tokens so its responsive rules contain no one-off spacing, type, radius, or motion literals.
+
 Elevation is structural, not luminous:
 
 1. `z-0` canvas/content

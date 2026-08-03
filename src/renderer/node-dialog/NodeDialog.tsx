@@ -35,20 +35,44 @@ export function NodeDialog() {
   const [activeSection, setActiveSection] = useState<DialogSection>("settings");
   const [saving, setSaving] = useState(false);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const restoreCanvasNodeIdRef = useRef<string | undefined>(undefined);
+  const trackedCanvasFocusRef = useRef<HTMLElement | null>(null);
+  const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const wasOpenRef = useRef(false);
   const open = node !== undefined;
   const runtimeNodeId = node?.kind === "agent" || node?.kind === "decision" ? node.id : undefined;
   const runtimeHarnessId = node?.kind === "agent" || node?.kind === "decision" ? node.harnessId : undefined;
 
+  useEffect(() => {
+    const trackCanvasFocus = (event: FocusEvent): void => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("[data-pane='graph-canvas'], [aria-label='Graph canvas']")
+      ) {
+        trackedCanvasFocusRef.current = target;
+        restoreCanvasNodeIdRef.current = target.closest<HTMLElement>(
+          ".react-flow__node[data-id]",
+        )?.dataset.id;
+      }
+    };
+    document.addEventListener("focusin", trackCanvasFocus);
+    return () => document.removeEventListener("focusin", trackCanvasFocus);
+  }, []);
+
   useLayoutEffect(() => {
     if (open && !wasOpenRef.current) {
-      restoreFocusRef.current = document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
+      const focusedElement = trackedCanvasFocusRef.current ?? (
+        document.activeElement instanceof HTMLElement ? document.activeElement : null
+      );
+      restoreFocusRef.current = focusedElement;
+      restoreCanvasNodeIdRef.current = focusedElement?.closest<HTMLElement>(
+        ".react-flow__node[data-id]",
+      )?.dataset.id ?? node?.id;
       setActiveSection("settings");
     }
     wasOpenRef.current = open;
-  }, [open]);
+  }, [node?.id, open]);
 
   useEffect(() => {
     if (!runtimeNodeId || !runtimeHarnessId) return;
@@ -57,15 +81,50 @@ export function NodeDialog() {
     );
   }, [loadHarnessModels, loadHarnesses, runtimeHarnessId, runtimeNodeId, setError]);
 
+  const restoreFocus = (): void => {
+    const canvasNodeId = restoreCanvasNodeIdRef.current;
+    const currentCanvasNode = canvasNodeId
+      ? [...document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]")].find(
+          (candidate) => candidate.dataset.id === canvasNodeId,
+        )
+      : undefined;
+    (currentCanvasNode ?? restoreFocusRef.current)?.focus();
+  };
   const close = (): void => {
-    const restoreTarget = restoreFocusRef.current;
     selectNode(undefined);
-    queueMicrotask(() => restoreTarget?.focus());
+    queueMicrotask(restoreFocus);
+    setTimeout(restoreFocus, 50);
   };
   const save = async (): Promise<void> => {
     setSaving(true);
     await saveCurrentGraph();
     setSaving(false);
+  };
+  const moveSectionFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    let nextIndex: number | undefined;
+    switch (event.key) {
+      case "ArrowLeft":
+      case "ArrowUp":
+        nextIndex = (index - 1 + SECTIONS.length) % SECTIONS.length;
+        break;
+      case "ArrowRight":
+      case "ArrowDown":
+        nextIndex = (index + 1) % SECTIONS.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = SECTIONS.length - 1;
+        break;
+      default:
+        return;
+    }
+    const nextSection = SECTIONS[nextIndex];
+    if (!nextSection) return;
+    event.preventDefault();
+    setActiveSection(nextSection.id);
+    segmentRefs.current[nextIndex]?.focus();
   };
 
   return (
@@ -78,7 +137,7 @@ export function NodeDialog() {
             aria-describedby="node-dialog-description"
             onCloseAutoFocus={(event) => {
               event.preventDefault();
-              restoreFocusRef.current?.focus();
+              restoreFocus();
             }}
           >
             <Dialog.Description id="node-dialog-description" className="visually-hidden">Edit the selected graph node and inspect its runtime input and output.</Dialog.Description>
@@ -93,7 +152,7 @@ export function NodeDialog() {
             </header>
 
             <div className="node-dialog-segments" role="radiogroup" aria-label="Node dialog section">
-              {SECTIONS.map((section) => <button key={section.id} type="button" role="radio" aria-checked={activeSection === section.id} onClick={() => setActiveSection(section.id)}>{section.label}</button>)}
+              {SECTIONS.map((section, index) => <button key={section.id} ref={(element) => { segmentRefs.current[index] = element; }} type="button" role="radio" aria-checked={activeSection === section.id} tabIndex={activeSection === section.id ? 0 : -1} onClick={() => setActiveSection(section.id)} onKeyDown={(event) => moveSectionFocus(event, index)}>{section.label}</button>)}
             </div>
 
             <div className="node-dialog-columns">

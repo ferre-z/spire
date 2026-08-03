@@ -1066,7 +1066,7 @@ button:not(:disabled) {
   z-index: 40;
   inset: 0;
   background: var(--overlay-scrim);
-  animation: node-dialog-fade 180ms ease-out;
+  animation: node-dialog-fade var(--duration-overlay) ease-out;
 }
 
 .node-dialog {
@@ -1075,48 +1075,48 @@ button:not(:disabled) {
   top: 50%;
   left: 50%;
   display: grid;
-  width: 68vw;
-  max-width: 1180px;
-  height: 76vh;
-  max-height: 920px;
-  min-width: 760px;
-  min-height: 560px;
+  width: var(--node-dialog-width);
+  max-width: var(--node-dialog-max-width);
+  height: var(--node-dialog-height);
+  max-height: var(--node-dialog-max-height);
+  min-width: var(--node-dialog-min-width);
+  min-height: var(--node-dialog-min-height);
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel);
-  box-shadow: 0 var(--space-6) 72px var(--shadow-overlay);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-overlay);
+  background: var(--surface-panel);
+  box-shadow: 0 var(--space-6) var(--node-dialog-shadow-blur) var(--shadow-overlay);
   transform: translate(-50%, -50%);
-  animation: node-dialog-enter 180ms ease-out;
+  animation: node-dialog-enter var(--duration-overlay) ease-out;
 }
 
 .node-dialog-header,
 .node-dialog-footer {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   min-width: 0;
-  padding: 12px 16px;
-  background: var(--bg-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-rail);
 }
 
 .node-dialog-header {
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-width) solid var(--border);
 }
 
 .node-dialog-footer {
   justify-content: flex-end;
-  border-top: 1px solid var(--border);
+  border-top: var(--border-width) solid var(--border);
 }
 
 .node-dialog-kind {
   display: flex;
   align-items: center;
-  gap: 7px;
-  color: var(--blue);
-  font: 600 9px/1 var(--mono);
-  letter-spacing: 0.08em;
+  gap: var(--space-2);
+  color: var(--accent-navigation);
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
   text-transform: uppercase;
 }
 
@@ -1127,10 +1127,10 @@ button:not(:disabled) {
 
 .node-dialog-title h2 {
   overflow: hidden;
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   color: var(--text);
-  font-size: 14px;
-  line-height: 1.3;
+  font-size: var(--font-size-heading);
+  line-height: var(--line-height-code);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1138,41 +1138,41 @@ button:not(:disabled) {
 .node-dialog-title code,
 .node-dialog-status {
   color: var(--text-3);
-  font: 500 9px/1.2 var(--mono);
+  font: var(--type-label);
 }
 
 .node-dialog-status {
-  padding: 5px 7px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-compact);
   text-transform: uppercase;
 }
 
 .node-dialog-status.status-running,
 .node-dialog-status.status-waiting {
-  border-color: var(--orange-2);
-  color: var(--orange);
+  border-color: var(--execution-border);
+  color: var(--accent-execution);
 }
 
 .node-dialog-status.status-succeeded {
-  color: var(--green);
+  color: var(--status-ready-text);
 }
 
 .node-dialog-status.status-failed,
 .node-dialog-status.status-cancelled {
-  color: var(--red);
+  color: var(--status-error-text);
 }
 
 .node-dialog-icon-button,
 .node-model-control button {
-  width: 36px;
-  height: 36px;
+  width: var(--control-height);
+  height: var(--control-height);
   flex: none;
   display: grid;
   place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
   color: var(--text-2);
 }
 
@@ -1188,8 +1188,8 @@ button:not(:disabled) {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  border-right: 1px solid var(--border);
-  background: var(--panel);
+  border-right: var(--border-width) solid var(--border);
+  background: var(--surface-panel);
 }
 
 .node-dialog-column:last-child {
@@ -1199,38 +1199,38 @@ button:not(:disabled) {
 .node-dialog-column-heading {
   display: flex;
   justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-soft);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--border-soft);
   color: var(--text-3);
-  font: 600 9px/1 var(--mono);
-  letter-spacing: 0.1em;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-meta);
 }
 
 .node-dialog-panel-body {
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
+  padding: var(--space-3);
   overflow-wrap: anywhere;
 }
 
 .node-dialog-panel-body section + section {
-  margin-top: 20px;
+  margin-top: var(--space-5);
 }
 
 .node-dialog-panel-body h3 {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin: 0 0 10px;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
   color: var(--text-2);
-  font: 600 10px/1.2 var(--mono);
-  letter-spacing: 0.08em;
+  font: 600 var(--font-size-meta)/var(--line-height-meta) var(--mono);
+  letter-spacing: var(--tracking-label);
 }
 
 .node-dialog-list {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
   padding: 0;
   margin: 0;
   list-style: none;
@@ -1239,58 +1239,58 @@ button:not(:disabled) {
 .node-dialog-list li,
 .node-execution-summary {
   min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: var(--bg-2);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-rail);
 }
 
 .node-dialog-list li > div {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .node-dialog-list strong {
   color: var(--text);
-  font-size: 10px;
+  font-size: var(--font-size-meta);
 }
 
 .node-dialog-list code,
 .node-dialog-list small {
   color: var(--text-3);
-  font: 500 8px/1.4 var(--mono);
+  font: 500 var(--font-size-caption)/var(--line-height-body) var(--mono);
 }
 
 .node-dialog-list p,
 .node-outcome p {
-  margin: 7px 0;
+  margin: var(--space-2) 0;
   color: var(--text-2);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-relaxed);
 }
 
 .node-dialog-empty,
 .node-dialog-validation {
   color: var(--text-3);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-relaxed);
 }
 
 .node-dialog-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .node-dialog-field {
   min-width: 0;
   display: grid;
-  gap: 7px;
+  gap: var(--space-2);
   color: var(--text-3);
-  font: 600 9px/1.2 var(--mono);
-  letter-spacing: 0.06em;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-field);
 }
 
 .node-dialog-field input,
@@ -1298,29 +1298,29 @@ button:not(:disabled) {
 .node-dialog-field textarea {
   width: 100%;
   min-width: 0;
-  min-height: 36px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-2);
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-rail);
   color: var(--text);
-  font: 400 11px/1.45 "Inter Variable", "Inter", system-ui, sans-serif;
+  font: 400 var(--font-size-body-small)/var(--line-height-body) "Inter Variable", "Inter", system-ui, sans-serif;
 }
 
 .node-dialog-field textarea {
-  min-height: 96px;
+  min-height: var(--node-dialog-textarea-min-height);
   resize: vertical;
 }
 
 .node-dialog-field small {
   color: var(--text-3);
-  font: 400 9px/1.4 "Inter Variable", "Inter", system-ui, sans-serif;
+  font: 400 var(--font-size-label)/var(--line-height-body) "Inter Variable", "Inter", system-ui, sans-serif;
   letter-spacing: 0;
 }
 
 .node-model-control {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .node-model-control select {
@@ -1330,48 +1330,48 @@ button:not(:disabled) {
 .node-authority-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .node-authority-actions button {
-  min-height: 36px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel-2);
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
   color: var(--text-3);
-  font: 500 9px/1 var(--mono);
+  font: var(--type-label);
 }
 
 .node-authority-actions button[aria-pressed="true"] {
-  border-color: var(--blue-line);
-  background: var(--blue-soft);
-  color: var(--blue);
+  border-color: var(--border-selected);
+  background: var(--surface-selected);
+  color: var(--accent-navigation);
 }
 
 .node-execution-summary dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin: 0 0 12px;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
 }
 
 .node-execution-summary dl div {
   display: grid;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .node-execution-summary dt {
   color: var(--text-3);
-  font: 500 8px/1 var(--mono);
+  font: 500 var(--font-size-caption)/var(--line-height-tight) var(--mono);
   text-transform: uppercase;
 }
 
 .node-execution-summary dd {
   margin: 0;
   color: var(--text);
-  font: 600 10px/1.3 var(--mono);
+  font: 600 var(--font-size-meta)/var(--line-height-code) var(--mono);
 }
 
 .node-outcome ul {
@@ -1383,18 +1383,18 @@ button:not(:disabled) {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   color: var(--text-2);
-  font-size: 9px;
+  font-size: var(--font-size-label);
 }
 
 .node-dialog-error,
 .node-dialog-validation .is-invalid {
-  color: var(--red);
+  color: var(--status-error-text);
 }
 
 .node-dialog-validation .is-valid {
-  color: var(--green);
+  color: var(--status-ready-text);
 }
 
 .node-dialog-validation {
@@ -1408,10 +1408,10 @@ button:not(:disabled) {
 
 .visually-hidden {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  width: var(--border-width);
+  height: var(--border-width);
   padding: 0;
-  margin: -1px;
+  margin: calc(-1 * var(--border-width));
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
@@ -1423,13 +1423,13 @@ button:not(:disabled) {
 }
 
 @keyframes node-dialog-enter {
-  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); }
+  from { opacity: 0; transform: translate(-50%, calc(-50% + var(--space-2))); }
 }
 
 @media (max-width: 1099px) {
   .node-dialog {
-    width: calc(100vw - 24px);
-    height: calc(100dvh - 24px);
+    width: calc(100vw - var(--node-dialog-compact-inset));
+    height: calc(100dvh - var(--node-dialog-compact-inset));
     max-width: none;
     max-height: none;
     min-width: 0;
@@ -1440,15 +1440,15 @@ button:not(:disabled) {
   .node-dialog-segments {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    padding: 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-2);
+    padding: var(--space-2);
+    border-bottom: var(--border-width) solid var(--border);
+    background: var(--surface-rail);
   }
 
   .node-dialog-segments button {
-    min-height: 36px;
-    border: 1px solid var(--border);
-    background: var(--panel-2);
+    min-height: var(--control-height);
+    border: var(--border-width) solid var(--border);
+    background: var(--surface-raised);
     color: var(--text-3);
   }
 
@@ -1457,8 +1457,8 @@ button:not(:disabled) {
   }
 
   .node-dialog-segments button[aria-checked="true"] {
-    background: var(--blue-soft);
-    color: var(--blue);
+    background: var(--surface-selected);
+    color: var(--accent-navigation);
   }
 
   .node-dialog-columns {
@@ -1509,13 +1509,13 @@ button:not(:disabled) {
   .node-dialog-footer button,
   .node-dialog-field input,
   .node-dialog-field select {
-    min-height: 44px;
+    min-height: var(--touch-target-size);
   }
 
   .node-dialog-icon-button,
   .node-model-control button {
-    width: 44px;
-    height: 44px;
+    width: var(--touch-target-size);
+    height: var(--touch-target-size);
   }
 }
 
@@ -2795,6 +2795,7 @@ button:not(:disabled) {
   --status-ready-text: #67d6aa;
   --status-warning-border: #63452e;
   --status-error-border: #603238;
+  --status-error-text: #ff6b72;
   --overlay-scrim: #050608b8;
   --shadow-soft: #00000038;
   --shadow-panel: #00000052;
@@ -2810,12 +2811,24 @@ button:not(:disabled) {
   --space-6: 24px;
   --space-8: 32px;
   --space-12: 48px;
+  --border-width: 1px;
+  --control-height: 36px;
+  --touch-target-size: 44px;
   --font-size-label: 9px;
+  --font-size-caption: 8px;
   --font-size-meta: 10px;
   --font-size-body-small: 11px;
   --font-size-body: 13px;
   --font-size-heading: 14px;
   --font-size-title: 15px;
+  --line-height-tight: 1;
+  --line-height-meta: 1.2;
+  --line-height-code: 1.3;
+  --line-height-body: 1.45;
+  --line-height-relaxed: 1.5;
+  --tracking-field: 0.06em;
+  --tracking-label: 0.08em;
+  --tracking-meta: 0.1em;
   --type-label: 600 var(--font-size-label)/1.2 var(--mono);
   --type-meta: 500 var(--font-size-meta)/1 var(--mono);
   --type-code: 500 var(--font-size-label)/1.3 var(--mono);
@@ -2828,6 +2841,15 @@ button:not(:disabled) {
   --context-panel-width: 312px;
   --launch-dock-height: 64px;
   --drawer-width: 440px;
+  --node-dialog-width: 68vw;
+  --node-dialog-height: 76vh;
+  --node-dialog-max-width: 1180px;
+  --node-dialog-max-height: 920px;
+  --node-dialog-min-width: 760px;
+  --node-dialog-min-height: 560px;
+  --node-dialog-compact-inset: 24px;
+  --node-dialog-shadow-blur: 72px;
+  --node-dialog-textarea-min-height: 96px;
   --radius-compact: 4px;
   --radius-control: 6px;
   --radius-panel: 8px;

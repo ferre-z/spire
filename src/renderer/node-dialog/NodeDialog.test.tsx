@@ -159,6 +159,41 @@ describe("NodeDialog", () => {
     expect(document.querySelector("[aria-label='Node dialog section'] [aria-checked='true']")?.textContent).toContain("Settings");
   });
 
+  it("moves compact section focus with arrow keys and wraps at the ends", async () => {
+    await renderDialog();
+    const radios = [...document.querySelectorAll<HTMLButtonElement>("[aria-label='Node dialog section'] [role='radio']")];
+    const input = radios[0];
+    const settings = radios[1];
+    const output = radios[2];
+    if (!input || !settings || !output) throw new Error("Missing node dialog section controls");
+    expect(radios.map((radio) => radio.tabIndex)).toEqual([-1, 0, -1]);
+
+    settings.focus();
+    await act(async () => settings.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+    expect(document.activeElement).toBe(output);
+    expect(output.getAttribute("aria-checked")).toBe("true");
+    await act(async () => output.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    expect(document.activeElement).toBe(input);
+    expect(input.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("moves compact section focus to boundaries with Home and End", async () => {
+    await renderDialog();
+    const radios = [...document.querySelectorAll<HTMLButtonElement>("[aria-label='Node dialog section'] [role='radio']")];
+    const input = radios[0];
+    const settings = radios[1];
+    const output = radios[2];
+    if (!input || !settings || !output) throw new Error("Missing node dialog section controls");
+
+    settings.focus();
+    await act(async () => settings.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })));
+    expect(document.activeElement).toBe(output);
+    await act(async () => output.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })));
+    expect(document.activeElement).toBe(input);
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
+    expect(document.activeElement).toBe(output);
+  });
+
   it("keeps the dialog open and shows inline validation after save", async () => {
     const saveCurrentGraph = vi.fn(async () => {
       useAppStore.setState({ validationResult: { valid: false, issues: ["Name is required"] } });

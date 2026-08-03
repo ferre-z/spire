@@ -39,7 +39,6 @@ describe("default layout models", () => {
     expect(center.children[1].children[0].id).toBe("task-launcher");
     expect(right.children[0].children.map((t) => t.id)).toEqual([
       "graph-settings",
-      "node-inspector",
       "runtime-policy",
       "collaboration",
       "harnesses",
@@ -62,7 +61,6 @@ describe("default layout models", () => {
     ]);
     expect(support.children[0].children.map((t) => t.id)).toEqual([
       "graph-settings",
-      "node-inspector",
       "runtime-policy",
       "collaboration",
       "harnesses",
@@ -97,9 +95,10 @@ describe("default layout models", () => {
 });
 
 describe("panel registry", () => {
-  it("registers all twelve workspace panes", () => {
-    expect(PANE_IDS).toHaveLength(12);
-    expect(new Set(PANE_IDS).size).toBe(12);
+  it("registers eleven workspace panes without a dock-hosted node inspector", () => {
+    expect(PANE_IDS).toHaveLength(11);
+    expect(new Set(PANE_IDS).size).toBe(11);
+    expect(PANE_IDS).not.toContain("node-inspector");
   });
 
   it("provides complete metadata for every pane", () => {

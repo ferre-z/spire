@@ -8,7 +8,6 @@ export const PANE_IDS = [
   "graph-canvas",
   "task-launcher",
   "graph-settings",
-  "node-inspector",
   "runtime-policy",
   "live-stream",
   "collaboration",
@@ -64,13 +63,6 @@ export const PANE_META: Record<PaneId, PaneMeta> = {
     title: "Graph Settings",
     popoutMinWidth: 300,
     popoutMinHeight: 320,
-  },
-  "node-inspector": {
-    id: "node-inspector",
-    component: "node-inspector",
-    title: "Node Inspector",
-    popoutMinWidth: 320,
-    popoutMinHeight: 380,
   },
   "runtime-policy": {
     id: "runtime-policy",
