@@ -1,0 +1,45 @@
+{
+  "settings": { "onboardingComplete": "true" },
+  "graphsV2": [
+    {
+      "id": "qa-graph",
+      "name": "Premium Workspace QA",
+      "version": 1,
+      "createdAt": "2026-08-02T12:00:00.000Z",
+      "maxSteps": 100,
+      "groups": [],
+      "nodes": [
+        {
+          "kind": "agent",
+          "id": "builder",
+          "name": "Builder",
+          "job": "Implement the verified workspace change.",
+          "harnessId": "opencode",
+          "modelId": "openrouter/example",
+          "access": { "mode": "workspace-write", "writeScopes": ["src/renderer"] },
+          "authority": { "scope": "self", "actions": [] },
+          "activation": "all",
+          "maxVisits": 3,
+          "position": { "x": 80, "y": 120 }
+        },
+        {
+          "kind": "checkpoint",
+          "id": "review",
+          "name": "Review",
+          "mode": "manual",
+          "position": { "x": 430, "y": 120 }
+        }
+      ],
+      "edges": [
+        {
+          "id": "builder-review",
+          "source": "builder",
+          "target": "review",
+          "kind": "review",
+          "when": "success",
+          "label": "Review result"
+        }
+      ]
+    }
+  ]
+}
