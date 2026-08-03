@@ -18,6 +18,7 @@ import {
 } from "../shared/control";
 import type {
   GraphDefinition,
+  GraphDefinitionV2,
   ModelOption,
   RunArtifacts,
   RunRecord,
@@ -110,6 +111,63 @@ function makeGraph(): GraphDefinition {
       { id: "e2", source: "impl", target: "plan", condition: "needs_changes", label: "revise" },
     ],
     maxIterations: 2,
+    createdAt: "2026-07-01T00:00:00.000Z",
+  };
+}
+
+function makeGraphV2(): GraphDefinitionV2 {
+  return {
+    id: "graph-1",
+    name: "Demo",
+    version: 3,
+    nodes: [
+      {
+        kind: "agent",
+        id: "plan",
+        name: "Planner",
+        job: "Plan the work.",
+        harnessId: "opencode",
+        modelId: "m1",
+        access: { mode: "read-only", writeScopes: [] },
+        authority: { scope: "self", actions: [] },
+        activation: "all",
+        maxVisits: 3,
+        position: { x: 0, y: 0 },
+      },
+      {
+        kind: "agent",
+        id: "impl",
+        name: "Implementer",
+        job: "Do the work.",
+        harnessId: "opencode",
+        modelId: "m1",
+        access: { mode: "workspace-write", writeScopes: ["**/*"] },
+        authority: { scope: "self", actions: [] },
+        activation: "all",
+        maxVisits: 3,
+        position: { x: 200, y: 0 },
+      },
+    ],
+    edges: [
+      {
+        id: "e1",
+        source: "plan",
+        target: "impl",
+        kind: "handoff",
+        when: "success",
+        label: "build",
+      },
+      {
+        id: "e2",
+        source: "impl",
+        target: "plan",
+        kind: "review",
+        when: "failure",
+        label: "revise",
+      },
+    ],
+    groups: [],
+    maxSteps: 2,
     createdAt: "2026-07-01T00:00:00.000Z",
   };
 }
@@ -666,8 +724,7 @@ describe("MCP server", () => {
         connected: true,
         version: "1.2.3",
       },
-      models: [],
-      graphs: [makeGraph()],
+      graphs: [makeGraphV2()],
       runs: [makeRun()],
       activeRunId: "run-1",
     };

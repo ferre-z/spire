@@ -20,6 +20,10 @@ function renderPane() {
 }
 
 beforeEach(() => {
+  Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+    configurable: true,
+    value: true,
+  });
   for (const key of [
     "snapshot",
     "graphsValidate",

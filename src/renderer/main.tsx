@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import "@xyflow/react/dist/base.css";
-import "flexlayout-react/style/dark.css";
 import "./styles.css";
 import { App } from "./App";
 

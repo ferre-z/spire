@@ -1,7 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type {
-  GraphDefinition,
   GraphDefinitionV2,
   HarnessId,
   RunRecord,
@@ -39,7 +38,6 @@ export type FixtureHarnessConfig = {
 
 export type SeedFixture = {
   settings?: Record<string, string>;
-  graphs?: GraphDefinition[];
   graphsV2?: GraphDefinitionV2[];
   runs?: RunRecord[];
   harnessFixtures?: Record<HarnessId, FixtureHarnessConfig>;
@@ -49,31 +47,39 @@ export function seedGraph(
   id: string,
   name: string,
   version = 1,
-): GraphDefinition {
+): GraphDefinitionV2 {
   const now = new Date().toISOString();
   return {
     id,
     name,
     version,
-    maxIterations: 3,
+    maxSteps: 12,
     createdAt: now,
     nodes: [
       {
+        kind: "agent",
         id: "planner",
-        type: "opencode",
-        role: "planner",
         name: "Architect",
-        model: "openai/gpt-5-codex",
-        instructions: "Plan and review with high standards.",
+        job: "Plan and review with high standards.",
+        harnessId: "opencode",
+        modelId: "openai/gpt-5-codex",
+        access: { mode: "read-only", writeScopes: [] },
+        authority: { scope: "self", actions: [] },
+        activation: "all",
+        maxVisits: 3,
         position: { x: 160, y: 190 },
       },
       {
+        kind: "agent",
         id: "implementer",
-        type: "opencode",
-        role: "implementer",
         name: "Builder",
-        model: "openai/gpt-5-codex",
-        instructions: "Implement carefully and validate.",
+        job: "Implement carefully and validate.",
+        harnessId: "opencode",
+        modelId: "openai/gpt-5-codex",
+        access: { mode: "workspace-write", writeScopes: ["**/*"] },
+        authority: { scope: "self", actions: [] },
+        activation: "all",
+        maxVisits: 3,
         position: { x: 570, y: 190 },
       },
     ],
@@ -82,29 +88,33 @@ export function seedGraph(
         id: "plan-build",
         source: "planner",
         target: "implementer",
-        condition: "always",
+        kind: "handoff",
+        when: "always",
         label: "task brief",
       },
       {
         id: "build-review",
         source: "implementer",
         target: "planner",
-        condition: "always",
+        kind: "review",
+        when: "always",
         label: "review",
       },
       {
         id: "revise",
         source: "planner",
         target: "implementer",
-        condition: "needs_changes",
+        kind: "review",
+        when: "failure",
         label: "revise",
       },
     ],
+    groups: [],
   };
 }
 
 export function mockRun(
-  graph: GraphDefinition,
+  graph: GraphDefinitionV2,
   overrides: Partial<RunRecord> = {},
 ): RunRecord {
   const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
@@ -165,7 +175,6 @@ export function mockRun(
 export type SeedOptions = {
   /** When false, the app boots into onboarding. Defaults to true. */
   onboardingComplete?: boolean;
-  graphs?: GraphDefinition[];
   graphsV2?: GraphDefinitionV2[];
   runs?: RunRecord[];
   harnessFixtures?: Record<HarnessId, FixtureHarnessConfig>;
@@ -178,9 +187,7 @@ export function writeSeedFixture(dir: string, options: SeedOptions = {}): string
       (options.onboardingComplete ?? true)
         ? { onboardingComplete: "true" }
         : {},
-    graphs: options.graphs ??
-      (options.graphsV2 ? undefined : [seedGraph("graph-alpha", "Build & Review")]),
-    graphsV2: options.graphsV2,
+    graphsV2: options.graphsV2 ?? [seedGraph("graph-alpha", "Build & Review")],
     runs: options.runs ?? [],
     harnessFixtures: options.harnessFixtures,
   };
