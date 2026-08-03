@@ -360,8 +360,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
       }
       if (!finished) {
         forceTimer = setTimeout(() => {
-          server.kill("SIGKILL");
-          finish();
+          if (!server.kill("SIGKILL")) finish();
         }, 1_000);
       }
     });
