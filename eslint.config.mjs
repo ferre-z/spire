@@ -3,7 +3,16 @@ import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: [".vite", ".superpowers", "mcp-dist", "out", "coverage"] },
+  {
+    ignores: [
+      ".vite",
+      ".superpowers",
+      ".worktrees",
+      "mcp-dist",
+      "out",
+      "coverage",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
