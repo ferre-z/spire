@@ -82,6 +82,7 @@ beforeEach(() => {
       maxSteps: 12,
       createdAt: new Date().toISOString(),
     },
+    selectedNodeId: undefined,
     selectedRunId: undefined,
     saveCurrentGraph: vi.fn(async () => true),
   });
@@ -112,6 +113,14 @@ describe("WorkspaceShell", () => {
     expect(document.querySelector("[aria-label='Graph context']")).toBeTruthy();
     expect(document.querySelector("[aria-label='Output utilities']")).toBeTruthy();
     expect(document.querySelector("[aria-label='Launch graph']")).toBeTruthy();
+  });
+
+  it("mounts the node dialog whenever a selected node resolves", async () => {
+    useAppStore.setState({ selectedNodeId: "gate" });
+
+    await renderShell();
+
+    expect(document.querySelector("[role='dialog']")?.textContent).toContain("Gate");
   });
 
   it("switches fixed navigation destinations and opens output drawers", async () => {

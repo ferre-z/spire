@@ -1,6 +1,5 @@
 import { ShieldCheck } from "lucide-react";
-import { isGraphV2, useAppStore } from "../store";
-import type { LegacyAgentNode } from "../../shared/domain";
+import { useAppStore } from "../store";
 
 const GRAPH_POLICY = [
   { label: "Runs execute in isolated Git worktrees", allowed: true },
@@ -10,33 +9,24 @@ const GRAPH_POLICY = [
 ];
 
 export function RuntimePolicyPane() {
-  const graph = useAppStore((state) => state.graph)!;
-  const selectedNodeId = useAppStore((state) => state.selectedNodeId);
-  const isV2 = isGraphV2(graph);
-  const node: LegacyAgentNode | undefined = isV2
-    ? undefined
-    : graph.nodes.find((item) => item.id === selectedNodeId);
+  const graph = useAppStore((state) => state.graph);
+
+  if (!graph) return <div className="pane pane-empty">No graph selected.</div>;
 
   return (
     <div className="pane pane-scroll pane-form" data-pane="runtime-policy">
       <div className="policy-header">
         <ShieldCheck size={16} />
         <div>
-          <strong>{node ? node.name : "Graph-wide policy"}</strong>
-          <small>
-            {node
-              ? `${node.role.toUpperCase()} NODE RUNTIME RULES`
-              : "APPLIES TO EVERY NODE IN THIS GRAPH"}
-          </small>
+          <strong>{graph.name}</strong>
+          <small>APPLIES TO EVERY NODE IN THIS GRAPH</small>
         </div>
       </div>
       <div className="permission-summary">
         <span>FILESYSTEM</span>
         <div>
-          <i className={node && node.role === "planner" ? "denied" : "allowed"} />
-          Filesystem edits{" "}
-          {node && node.role === "planner" ? "denied" : "allowed"}
-          {node ? "" : " for implementer nodes"}
+          <i className="allowed" />
+          Filesystem edits follow each node's access mode
         </div>
         <div>
           <i className="denied" />

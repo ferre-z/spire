@@ -5,7 +5,7 @@ import { RunHistoryPane } from "../panes/RunHistoryPane";
 import { GraphCanvasPane } from "../panes/GraphCanvasPane";
 import { TaskLauncherPane } from "../panes/TaskLauncherPane";
 import { GraphSettingsPane } from "../panes/GraphSettingsPane";
-import { NodeInspectorPane } from "../panes/NodeInspectorPane";
+import { NodeDialog } from "../node-dialog/NodeDialog";
 import { RuntimePolicyPane } from "../panes/RuntimePolicyPane";
 import { LiveStreamPane } from "../panes/LiveStreamPane";
 import { DiffPane } from "../panes/DiffPane";
@@ -19,7 +19,7 @@ const PANE_RENDERERS: Record<PaneId, () => ReactNode> = {
   "graph-canvas": () => <GraphCanvasPane />,
   "task-launcher": () => <TaskLauncherPane />,
   "graph-settings": () => <GraphSettingsPane />,
-  "node-inspector": () => <NodeInspectorPane />,
+  "node-inspector": () => <NodeDialog />,
   "runtime-policy": () => <RuntimePolicyPane />,
   "live-stream": () => <LiveStreamPane />,
   collaboration: () => <CollaborationPane />,

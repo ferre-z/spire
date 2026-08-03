@@ -1061,6 +1061,471 @@ button:not(:disabled) {
   background: #6a7180;
 }
 
+.node-dialog-overlay {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  background: var(--overlay-scrim);
+  animation: node-dialog-fade 180ms ease-out;
+}
+
+.node-dialog {
+  position: fixed;
+  z-index: 41;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 68vw;
+  max-width: 1180px;
+  height: 76vh;
+  max-height: 920px;
+  min-width: 760px;
+  min-height: 560px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 var(--space-6) 72px var(--shadow-overlay);
+  transform: translate(-50%, -50%);
+  animation: node-dialog-enter 180ms ease-out;
+}
+
+.node-dialog-header,
+.node-dialog-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 16px;
+  background: var(--bg-2);
+}
+
+.node-dialog-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.node-dialog-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}
+
+.node-dialog-kind {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--blue);
+  font: 600 9px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.node-dialog-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.node-dialog-title h2 {
+  overflow: hidden;
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-dialog-title code,
+.node-dialog-status {
+  color: var(--text-3);
+  font: 500 9px/1.2 var(--mono);
+}
+
+.node-dialog-status {
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.node-dialog-status.status-running,
+.node-dialog-status.status-waiting {
+  border-color: var(--orange-2);
+  color: var(--orange);
+}
+
+.node-dialog-status.status-succeeded {
+  color: var(--green);
+}
+
+.node-dialog-status.status-failed,
+.node-dialog-status.status-cancelled {
+  color: var(--red);
+}
+
+.node-dialog-icon-button,
+.node-model-control button {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text-2);
+}
+
+.node-dialog-columns {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 24fr) minmax(0, 52fr) minmax(0, 24fr);
+}
+
+.node-dialog-column {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.node-dialog-column:last-child {
+  border-right: 0;
+}
+
+.node-dialog-column-heading {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-3);
+  font: 600 9px/1 var(--mono);
+  letter-spacing: 0.1em;
+}
+
+.node-dialog-panel-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+
+.node-dialog-panel-body section + section {
+  margin-top: 20px;
+}
+
+.node-dialog-panel-body h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  color: var(--text-2);
+  font: 600 10px/1.2 var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.node-dialog-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.node-dialog-list li,
+.node-execution-summary {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+
+.node-dialog-list li > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.node-dialog-list strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.node-dialog-list code,
+.node-dialog-list small {
+  color: var(--text-3);
+  font: 500 8px/1.4 var(--mono);
+}
+
+.node-dialog-list p,
+.node-outcome p {
+  margin: 7px 0;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.node-dialog-empty,
+.node-dialog-validation {
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.node-dialog-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.node-dialog-field {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: var(--text-3);
+  font: 600 9px/1.2 var(--mono);
+  letter-spacing: 0.06em;
+}
+
+.node-dialog-field input,
+.node-dialog-field select,
+.node-dialog-field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text);
+  font: 400 11px/1.45 "Inter Variable", "Inter", system-ui, sans-serif;
+}
+
+.node-dialog-field textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.node-dialog-field small {
+  color: var(--text-3);
+  font: 400 9px/1.4 "Inter Variable", "Inter", system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+.node-model-control {
+  display: flex;
+  gap: 8px;
+}
+
+.node-model-control select {
+  flex: 1;
+}
+
+.node-authority-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.node-authority-actions button {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text-3);
+  font: 500 9px/1 var(--mono);
+}
+
+.node-authority-actions button[aria-pressed="true"] {
+  border-color: var(--blue-line);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.node-execution-summary dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.node-execution-summary dl div {
+  display: grid;
+  gap: 4px;
+}
+
+.node-execution-summary dt {
+  color: var(--text-3);
+  font: 500 8px/1 var(--mono);
+  text-transform: uppercase;
+}
+
+.node-execution-summary dd {
+  margin: 0;
+  color: var(--text);
+  font: 600 10px/1.3 var(--mono);
+}
+
+.node-outcome ul {
+  padding: 0;
+  list-style: none;
+}
+
+.node-outcome li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 9px;
+}
+
+.node-dialog-error,
+.node-dialog-validation .is-invalid {
+  color: var(--red);
+}
+
+.node-dialog-validation .is-valid {
+  color: var(--green);
+}
+
+.node-dialog-validation {
+  min-width: 0;
+  flex: 1;
+}
+
+.node-dialog-segments {
+  display: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes node-dialog-fade {
+  from { opacity: 0; }
+}
+
+@keyframes node-dialog-enter {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); }
+}
+
+@media (max-width: 1099px) {
+  .node-dialog {
+    width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+    max-width: none;
+    max-height: none;
+    min-width: 0;
+    min-height: 0;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .node-dialog-segments {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
+  }
+
+  .node-dialog-segments button {
+    min-height: 36px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text-3);
+  }
+
+  .node-dialog-segments button + button {
+    border-left: 0;
+  }
+
+  .node-dialog-segments button[aria-checked="true"] {
+    background: var(--blue-soft);
+    color: var(--blue);
+  }
+
+  .node-dialog-columns {
+    display: block;
+  }
+
+  .node-dialog-column {
+    display: none;
+    height: 100%;
+    border-right: 0;
+  }
+
+  .node-dialog-column[data-active="true"] {
+    display: grid;
+  }
+}
+
+@media (max-width: 599px) {
+  .node-dialog {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .node-dialog-kind span,
+  .node-dialog-status {
+    display: none;
+  }
+
+  .node-dialog-footer {
+    flex-wrap: wrap;
+  }
+
+  .node-dialog-validation {
+    flex-basis: 100%;
+  }
+
+  .node-dialog-field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (pointer: coarse) {
+  .node-dialog-icon-button,
+  .node-model-control button,
+  .node-dialog-segments button,
+  .node-authority-actions button,
+  .node-dialog-footer button,
+  .node-dialog-field input,
+  .node-dialog-field select {
+    min-height: 44px;
+  }
+
+  .node-dialog-icon-button,
+  .node-model-control button {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node-dialog,
+  .node-dialog-overlay {
+    animation: none;
+  }
+}
+
 /* ---------- run panes ---------- */
 
 .pane-run-header {

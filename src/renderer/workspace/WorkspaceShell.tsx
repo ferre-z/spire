@@ -21,6 +21,7 @@ import { ResultPane } from "../panes/ResultPane";
 import { RunHistoryPane } from "../panes/RunHistoryPane";
 import { RuntimePolicyPane } from "../panes/RuntimePolicyPane";
 import { TaskLauncherPane } from "../panes/TaskLauncherPane";
+import { NodeDialog } from "../node-dialog/NodeDialog";
 import { useAppStore } from "../store";
 import { CommandMenu } from "./CommandMenu";
 import {
@@ -199,6 +200,7 @@ export function WorkspaceShell() {
         {drawer ? renderDrawer(drawer) : null}
       </Drawer>
       <CommandMenu />
+      <NodeDialog />
     </div>
   );
 }
