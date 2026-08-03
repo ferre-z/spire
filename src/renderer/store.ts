@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import type {
   AppSnapshot,
-  GraphDefinition,
   GraphDefinitionV2,
   GraphEdge,
   GraphGroup,
@@ -114,12 +113,6 @@ function mergeTraceEvents(
   return merged.length > TRACE_WINDOW_LIMIT
     ? merged.slice(merged.length - TRACE_WINDOW_LIMIT)
     : merged;
-}
-
-export type GraphLike = GraphDefinition | GraphDefinitionV2;
-
-export function isGraphV2(graph: GraphLike): graph is GraphDefinitionV2 {
-  return "maxSteps" in graph;
 }
 
 type AppState = {
