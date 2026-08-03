@@ -1,14 +1,6 @@
 import type { Node, XYPosition } from "@xyflow/react";
 import type { GraphDefinitionV2, GraphGroup } from "../../shared/domain";
-
-export const CANVAS_METRICS = {
-  nodeWidth: 212,
-  nodeHeight: 112,
-  groupPadding: 32,
-  groupHeaderHeight: 40,
-  collapsedGroupWidth: 212,
-  collapsedGroupHeight: 40,
-} as const;
+import { CANVAS_TOKENS } from "./CanvasTokens";
 
 export type GroupLayout = {
   readonly group: GraphGroup;
@@ -60,8 +52,8 @@ export function calculateGroupLayouts(graph: GraphDefinitionV2): ReadonlyMap<str
       .filter((node) => node.groupId === group.id)
       .map((node) => ({
         ...node.position,
-        width: CANVAS_METRICS.nodeWidth,
-        height: CANVAS_METRICS.nodeHeight,
+        width: CANVAS_TOKENS.nodeWidth,
+        height: CANVAS_TOKENS.nodeHeight,
       }));
     const childGroupBounds: Bounds[] = graph.groups
       .filter((candidate) => candidate.parentGroupId === group.id)
@@ -74,20 +66,20 @@ export function calculateGroupLayouts(graph: GraphDefinitionV2): ReadonlyMap<str
     const minY = members.length > 0 ? Math.min(...members.map((member) => member.y)) : 0;
     const maxX = members.length > 0
       ? Math.max(...members.map((member) => member.x + member.width))
-      : CANVAS_METRICS.nodeWidth;
+      : CANVAS_TOKENS.nodeWidth;
     const maxY = members.length > 0
       ? Math.max(...members.map((member) => member.y + member.height))
-      : CANVAS_METRICS.nodeHeight;
+      : CANVAS_TOKENS.nodeHeight;
     const position = {
-      x: minX - CANVAS_METRICS.groupPadding,
-      y: minY - CANVAS_METRICS.groupHeaderHeight,
+      x: minX - CANVAS_TOKENS.groupPadding,
+      y: minY - CANVAS_TOKENS.groupHeaderHeight,
     };
     const layout = {
       group,
       depth: groupDepth(group, groups),
       position,
-      width: maxX + CANVAS_METRICS.groupPadding - position.x,
-      height: maxY + CANVAS_METRICS.groupPadding - position.y,
+      width: maxX + CANVAS_TOKENS.groupPadding - position.x,
+      height: maxY + CANVAS_TOKENS.groupPadding - position.y,
     } satisfies GroupLayout;
     layouts.set(group.id, layout);
     return layout;

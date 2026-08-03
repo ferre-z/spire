@@ -2540,19 +2540,7 @@ button:not(:disabled) {
   --canvas-edge-idle: #4a5160;
   --canvas-minimap-node: #394050;
   --canvas-minimap-mask: #0a0b0ec7;
-  --canvas-node-width: 212px;
-  --canvas-node-height: 112px;
-  --canvas-minimap-width: 148px;
-  --canvas-group-padding: 32px;
-  --canvas-group-header-height: 40px;
-  --canvas-edge-label-padding-block: 4px;
-  --canvas-edge-label-padding-inline: 7px;
   --canvas-edge-label-font: var(--type-label);
-  --canvas-edge-label-radius: var(--radius-compact);
-  --canvas-motion-duration: var(--duration-tint);
-  --canvas-selection-outline-width: 2px;
-  --canvas-selection-outline-offset: 2px;
-  --canvas-handle-border-width: 2px;
   --radius-compact: 4px;
   --radius-control: 6px;
   --radius-panel: 8px;
@@ -2912,8 +2900,8 @@ body { background: var(--surface-root); color: var(--text); }
 
 .canvas-group-toggle {
   display: grid;
-  width: var(--space-7);
-  height: var(--space-7);
+  width: var(--control-height);
+  height: var(--control-height);
   flex: 0 0 auto;
   place-items: center;
   padding: 0;

@@ -4,11 +4,11 @@ import type { ExecutionPlan } from "../../shared/execution";
 import type { CanvasEdge } from "../components/CanvasEdge";
 import {
   calculateGroupLayouts,
-  CANVAS_METRICS,
   isGroupHidden,
   isNodeHidden,
   visibleNodeIds,
 } from "./GraphCanvasLayout";
+import { CANVAS_TOKENS } from "./CanvasTokens";
 
 const EDGE_IDLE = "var(--canvas-edge-idle)";
 const EDGE_EXECUTING = "var(--accent-execution)";
@@ -51,8 +51,8 @@ export function buildCanvasNodes(
         extent: group.parentGroupId ? "parent" : undefined,
         draggable: false,
         style: {
-          width: isCollapsed ? CANVAS_METRICS.collapsedGroupWidth : layout?.width,
-          height: isCollapsed ? CANVAS_METRICS.collapsedGroupHeight : layout?.height,
+          width: isCollapsed ? CANVAS_TOKENS.collapsedGroupWidth : layout?.width,
+          height: isCollapsed ? CANVAS_TOKENS.collapsedGroupHeight : layout?.height,
         },
         data: {
           group,
@@ -113,11 +113,16 @@ export function buildCanvasEdges(
         animated: false,
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          width: 16,
-          height: 16,
+          width: CANVAS_TOKENS.markerSize,
+          height: CANVAS_TOKENS.markerSize,
           color,
         },
-        style: { stroke: color, strokeWidth: executing ? 2 : 1.25 },
+        style: {
+          stroke: color,
+          strokeWidth: executing
+            ? CANVAS_TOKENS.edgeWidthExecuting
+            : CANVAS_TOKENS.edgeWidthIdle,
+        },
       };
     });
 }

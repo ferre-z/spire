@@ -45,20 +45,31 @@ type MockNodePositionChange = {
   readonly dragging: boolean;
 };
 
+type MockBackgroundProps = {
+  readonly gap: number;
+  readonly size: number;
+};
+
 const flowHarness = vi.hoisted((): {
   props: MockReactFlowProps | undefined;
   fitView: ReturnType<typeof vi.fn>;
   renderCount: number;
+  background: MockBackgroundProps | undefined;
 } => ({
   props: undefined,
   fitView: vi.fn(),
   renderCount: 0,
+  background: undefined,
 }));
 
 vi.mock("@xyflow/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@xyflow/react")>();
   return {
     ...actual,
+    Background: (props: MockBackgroundProps) => {
+      flowHarness.background = props;
+      return null;
+    },
     ReactFlow: (props: MockReactFlowProps) => {
       flowHarness.props = props;
       flowHarness.renderCount += 1;
@@ -210,6 +221,7 @@ beforeEach(() => {
   flowHarness.props = undefined;
   flowHarness.fitView.mockClear();
   flowHarness.renderCount = 0;
+  flowHarness.background = undefined;
   useAppStore.setState({
     snapshot: {
       onboardingComplete: true,
@@ -397,6 +409,20 @@ describe("canvas creation tools", () => {
 });
 
 describe("ReactFlow interaction contract", () => {
+  it("injects one shared canvas metric contract into ReactFlow and CSS", async () => {
+    const surface = await renderCanvas();
+    const canvas = surface.querySelector(".graph-canvas");
+    if (!(canvas instanceof HTMLDivElement)) throw new Error("Missing graph canvas");
+    expect(canvas.style.getPropertyValue("--canvas-node-width")).toBe("212px");
+    expect(canvas.style.getPropertyValue("--canvas-group-padding")).toBe("32px");
+    expect(canvas.style.getPropertyValue("--canvas-motion-duration")).toBe("120ms");
+    expect(flowHarness.background).toEqual({ gap: 22, size: 1, variant: "dots", color: "var(--canvas-grid-dot)" });
+    expect(flowHarness.fitView).toHaveBeenCalledWith({ padding: 0.2, duration: 120 });
+    const [edge] = buildCanvasEdges(makeGraph(), makePlan());
+    expect(edge?.markerEnd).toMatchObject({ width: 16, height: 16 });
+    expect(edge?.style?.strokeWidth).toBe(2);
+  });
+
   it("expands and collapses a group from its accessible control", async () => {
     const surface = await renderCanvas();
     const toggle = buttonByName(surface, "Collapse Review team");

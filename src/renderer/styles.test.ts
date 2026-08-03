@@ -63,9 +63,23 @@ describe("active renderer design contract", () => {
     expect(canvasRules).toContain("var(--canvas-group-header-height)");
     expect(canvasRules).toContain("var(--canvas-selection-outline-width)");
     expect(canvasRules).toContain("var(--canvas-handle-border-width)");
+    expect(canvasRules).toMatch(
+      /\.canvas-group-toggle\s*\{[\s\S]*?width:\s*var\(--control-height\);[\s\S]*?height:\s*var\(--control-height\);/,
+    );
+    expect(stylesheet.slice(contractStart, activeRulesStart)).toContain(
+      "--control-height: 36px",
+    );
+    expect(canvasRules).not.toContain("var(--space-7)");
     expect(canvasRules).not.toMatch(/labelStyle|labelBgStyle/);
     expect(canvasRules).not.toMatch(
       /^[ \t]+(?:gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?|border-radius|font(?:-size)?|line-height|letter-spacing|animation(?:-duration)?|transition(?:-duration)?|outline(?:-offset)?)\s*:[^;}]*(?:\d+(?:\.\d+)?(?:px|em|ms))/im,
+    );
+  });
+
+  it("receives canvas geometry from the typed runtime contract instead of duplicating it", () => {
+    const rootContract = stylesheet.slice(contractStart, activeRulesStart);
+    expect(rootContract).not.toMatch(
+      /--canvas-(?:node-width|node-height|group-padding|group-header-height|minimap-width|motion-duration|edge-label-padding|edge-label-radius|selection-outline|handle-border-width)\s*:/,
     );
   });
 });

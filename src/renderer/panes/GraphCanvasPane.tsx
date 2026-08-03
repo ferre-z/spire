@@ -25,6 +25,7 @@ import {
 import { CanvasEdgeRenderer } from "../components/CanvasEdge";
 import { useAppStore } from "../store";
 import { GraphCanvasPalette } from "./GraphCanvasPalette";
+import { CANVAS_CSS_VARIABLES, CANVAS_TOKENS } from "./CanvasTokens";
 import { absoluteGraphPosition } from "./GraphCanvasLayout";
 import {
   buildCanvasEdges,
@@ -53,7 +54,11 @@ const EDGE_TYPES = { canvas: CanvasEdgeRenderer } satisfies EdgeTypes;
 export function GraphCanvasPane() {
   const graph = useAppStore((state) => state.graph);
   return (
-    <div className="graph-canvas" data-pane="graph-canvas">
+    <div
+      className="graph-canvas"
+      data-pane="graph-canvas"
+      style={CANVAS_CSS_VARIABLES}
+    >
       {graph ? <GraphCanvasPalette graph={graph} /> : null}
       {graph ? (
         <ReactFlowProvider>
@@ -79,7 +84,10 @@ function CanvasView({ graph }: { readonly graph: GraphDefinitionV2 }) {
   const draggingRef = useRef(false);
 
   useEffect(() => {
-    void fitView({ padding: 0.2, duration: 120 });
+    void fitView({
+      padding: CANVAS_TOKENS.fitPadding,
+      duration: CANVAS_TOKENS.motionDurationMs,
+    });
   }, [fitView]);
 
   useEffect(() => {
@@ -119,16 +127,16 @@ function CanvasView({ graph }: { readonly graph: GraphDefinitionV2 }) {
       onNodeDragStart={handleNodeDragStart}
       onNodeDragStop={handleNodeDragStop}
       fitView
-      minZoom={0.55}
-      maxZoom={1.6}
+      minZoom={CANVAS_TOKENS.minZoom}
+      maxZoom={CANVAS_TOKENS.maxZoom}
       deleteKeyCode={null}
       proOptions={{ hideAttribution: true }}
       aria-label="Graph editor"
     >
       <Background
         variant={BackgroundVariant.Dots}
-        gap={22}
-        size={1}
+        gap={CANVAS_TOKENS.gridGap}
+        size={CANVAS_TOKENS.gridDotSize}
         color="var(--canvas-grid-dot)"
       />
       <Controls showInteractive={false} position="bottom-left" />
