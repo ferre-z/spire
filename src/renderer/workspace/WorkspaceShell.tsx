@@ -1,52 +1,30 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect } from "react";
 import {
   Activity,
-  Bot,
   GitBranch,
-  History,
-  Library,
-  MessageSquare,
   ScrollText,
   Settings2,
 } from "lucide-react";
-import { Drawer, RailItem, SegmentedControl, StatusBadge, ToolCard } from "../components/UiPrimitives";
-import { CollaborationPane } from "../panes/CollaborationPane";
-import { DiffPane } from "../panes/DiffPane";
+import { Drawer, RailItem, SegmentedControl, ToolCard } from "../components/UiPrimitives";
 import { GraphCanvasPane } from "../panes/GraphCanvasPane";
-import { GraphLibraryPane } from "../panes/GraphLibraryPane";
 import { GraphSettingsPane } from "../panes/GraphSettingsPane";
-import { HarnessesPane } from "../panes/HarnessesPane";
-import { LiveStreamPane } from "../panes/LiveStreamPane";
-import { ResultPane } from "../panes/ResultPane";
-import { RunHistoryPane } from "../panes/RunHistoryPane";
 import { RuntimePolicyPane } from "../panes/RuntimePolicyPane";
 import { TaskLauncherPane } from "../panes/TaskLauncherPane";
 import { NodeDialog } from "../node-dialog/NodeDialog";
-import { useAppStore } from "../store";
 import { CommandMenu } from "./CommandMenu";
 import {
+  DRAWER_LABELS,
+  NAVIGATION_ITEMS,
+  PanelHeader,
+  SelectedRunSummary,
+  navigationTitle,
+  renderDrawer,
+  renderNavigation,
+} from "./WorkspacePanels";
+import {
   DRAWER_DESTINATIONS,
-  type DrawerDestination,
-  type NavigationDestination,
   useWorkspaceUiStore,
 } from "./workspaceUiStore";
-
-const NAVIGATION_ITEMS: readonly {
-  readonly id: NavigationDestination;
-  readonly label: string;
-  readonly icon: ReactNode;
-}[] = [
-  { id: "graph-library", label: "Graph Library", icon: <Library size={18} /> },
-  { id: "run-history", label: "Run History", icon: <History size={18} /> },
-  { id: "harnesses", label: "Harnesses", icon: <Bot size={18} /> },
-  { id: "collaboration", label: "Collaboration", icon: <MessageSquare size={18} /> },
-] as const;
-
-const DRAWER_LABELS: Readonly<Record<DrawerDestination, string>> = {
-  "live-stream": "Live Stream",
-  diff: "Diff",
-  result: "Result",
-};
 
 export function WorkspaceShell() {
   const activeNavigation = useWorkspaceUiStore((state) => state.activeNavigation);
@@ -202,68 +180,5 @@ export function WorkspaceShell() {
       <CommandMenu />
       <NodeDialog />
     </div>
-  );
-}
-
-function PanelHeader({ eyebrow, title }: { readonly eyebrow: string; readonly title: string }) {
-  return (
-    <header className="workspace-panel-header">
-      <span>{eyebrow}</span>
-      <h2>{title}</h2>
-    </header>
-  );
-}
-
-function navigationTitle(destination: NavigationDestination): string {
-  return NAVIGATION_ITEMS.find((item) => item.id === destination)?.label ?? "Navigation";
-}
-
-function renderNavigation(destination: NavigationDestination): ReactNode {
-  switch (destination) {
-    case "graph-library":
-      return <GraphLibraryPane />;
-    case "run-history":
-      return <RunHistoryPane />;
-    case "harnesses":
-      return <HarnessesPane />;
-    case "collaboration":
-      return <CollaborationPane />;
-  }
-}
-
-function renderDrawer(destination: DrawerDestination): ReactNode {
-  switch (destination) {
-    case "live-stream":
-      return <LiveStreamPane />;
-    case "diff":
-      return <DiffPane />;
-    case "result":
-      return <ResultPane />;
-  }
-}
-
-function SelectedRunSummary() {
-  const snapshot = useAppStore((state) => state.snapshot);
-  const selectedRunId = useAppStore((state) => state.selectedRunId);
-  const run = snapshot?.runs.find((candidate) => candidate.id === selectedRunId);
-  const tone = run
-    ? ["failed", "needs_attention"].includes(run.status)
-      ? "error"
-      : ["succeeded"].includes(run.status)
-        ? "ready"
-        : "warning"
-    : "neutral";
-  return (
-    <ToolCard title="Selected Run" className="run-summary-card">
-      {run ? (
-        <>
-          <StatusBadge label={run.status.replace("_", " ")} tone={tone} />
-          <strong>{run.goal}</strong>
-          <code>{run.id}</code>
-        </>
-      ) : (
-        <p>No run selected.</p>
-      )}
-    </ToolCard>
   );
 }

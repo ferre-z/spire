@@ -41,8 +41,6 @@
 
   --mono: "JetBrains Mono Variable", "JetBrains Mono", monospace;
 
-  --glass-bg: rgba(16, 18, 22, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.07);
 }
 
 * {
@@ -104,83 +102,6 @@ button:not(:disabled) {
   background-clip: padding-box;
 }
 
-/* ---------- glass ---------- */
-
-.glass {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-}
-
-@supports ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
-  .glass {
-    -webkit-backdrop-filter: blur(16px) saturate(1.25);
-    backdrop-filter: blur(16px) saturate(1.25);
-  }
-}
-
-@supports not ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
-  .glass {
-    background: #101216;
-  }
-}
-
-/* ---------- liquid border (masked gradient, flows once on hover/focus) ---------- */
-
-@property --lb-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
-.liquid-border {
-  position: relative;
-}
-
-.liquid-border::before {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  padding: 1px;
-  border-radius: inherit;
-  background: conic-gradient(
-    from var(--lb-angle),
-    transparent 0deg,
-    var(--blue) 60deg,
-    var(--orange) 120deg,
-    transparent 200deg
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.liquid-border:hover::before,
-.liquid-border:focus-visible::before {
-  opacity: 1;
-  animation: liquid-border-flow 540ms linear 1;
-}
-
-@keyframes liquid-border-flow {
-  to {
-    --lb-angle: 360deg;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .liquid-border:hover::before,
-  .liquid-border:focus-visible::before {
-    animation: none;
-    background: linear-gradient(var(--blue), var(--blue));
-  }
-}
-
 /* ---------- app shell ---------- */
 
 .app-shell {
@@ -189,15 +110,6 @@ button:not(:disabled) {
   flex-direction: column;
   height: 100%;
   background: var(--bg);
-}
-
-.workspace-mesh {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(44% 38% at 16% 8%, rgba(110, 168, 254, 0.07), transparent 70%),
-    radial-gradient(38% 42% at 86% 90%, rgba(255, 138, 61, 0.05), transparent 70%);
 }
 
 .titlebar {
@@ -390,20 +302,20 @@ button:not(:disabled) {
 
 .section-heading {
   display: flex;
-  height: 27px;
+  height: var(--control-height-compact);
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
-  color: #59616f;
-  font: 600 9px/1 var(--mono);
-  letter-spacing: 0.11em;
+  padding: 0 var(--space-2);
+  color: var(--text-3);
+  font: var(--type-label);
+  letter-spacing: var(--tracking-meta);
 }
 
 .section-heading button {
   border: 0;
   background: transparent;
   color: var(--text-3);
-  padding: 4px;
+  padding: var(--space-1);
   display: grid;
   place-items: center;
 }
@@ -415,32 +327,32 @@ button:not(:disabled) {
   align-items: center;
   border: 0;
   background: transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   text-align: left;
   color: var(--text-2);
 }
 
 .graph-list-item {
-  min-height: 52px;
-  gap: 9px;
-  padding: 7px 8px;
+  min-height: var(--graph-list-item-height);
+  gap: var(--space-2);
+  padding: var(--space-2);
 }
 
 .graph-list-item.selected {
   color: var(--text);
-  background: linear-gradient(90deg, var(--blue-soft), rgba(110, 168, 254, 0.02));
-  box-shadow: inset 2px 0 var(--blue);
+  background: var(--surface-selected);
+  box-shadow: inset var(--selection-mark-width) 0 var(--accent-navigation);
 }
 
 .graph-list-icon {
-  width: 28px;
-  height: 28px;
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
   display: grid;
   place-items: center;
-  color: var(--blue);
-  border: 1px solid #263040;
-  border-radius: 6px;
-  background: #12161d;
+  color: var(--accent-navigation);
+  border: var(--border-width) solid var(--border-interactive);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
 }
 
 .graph-list-item > span:nth-child(2),
@@ -449,14 +361,14 @@ button:not(:disabled) {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .graph-list-item strong,
 .run-list-item strong {
   overflow: hidden;
   color: inherit;
-  font-size: 11px;
+  font-size: var(--font-size-body-small);
   font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -466,55 +378,55 @@ button:not(:disabled) {
 .run-list-item small {
   overflow: hidden;
   color: var(--text-3);
-  font: 400 9px/1.2 var(--mono);
+  font: var(--type-code);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .run-list-item {
-  min-height: 48px;
-  gap: 8px;
-  padding: 7px 8px;
+  min-height: var(--run-list-item-height);
+  gap: var(--space-2);
+  padding: var(--space-2);
 }
 
 .run-list-item.selected {
-  background: var(--panel-3);
-  box-shadow: inset 2px 0 var(--blue);
+  background: var(--surface-active);
+  box-shadow: inset var(--selection-mark-width) 0 var(--accent-navigation);
 }
 
 .empty-sidebar {
-  padding: 12px 8px;
+  padding: var(--space-3) var(--space-2);
   color: var(--text-3);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-relaxed);
 }
 
 /* ---------- task launcher ---------- */
 
 .task-launcher {
   display: grid;
-  grid-template-columns: minmax(120px, 180px) minmax(160px, 1fr) auto;
+  grid-template-columns: minmax(var(--launcher-repository-min), var(--launcher-repository-max)) minmax(var(--launcher-goal-min), 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
 }
 
 .repo-picker,
 .goal-field {
-  height: 38px;
+  height: var(--control-height);
   display: flex;
   align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg-2);
+  gap: var(--space-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-rail);
   color: var(--text-3);
 }
 
 .repo-picker {
   min-width: 0;
-  padding: 0 10px;
-  font: 500 9px/1 var(--mono);
+  padding: 0 var(--space-3);
+  font: var(--type-label);
 }
 
 .repo-picker span {
@@ -524,8 +436,8 @@ button:not(:disabled) {
 }
 
 .goal-field {
-  padding: 0 10px;
-  color: var(--blue);
+  padding: 0 var(--space-3);
+  color: var(--accent-navigation);
 }
 
 .goal-field input {
@@ -535,16 +447,16 @@ button:not(:disabled) {
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--font-size-body-small);
 }
 
 .goal-field input::placeholder {
-  color: #525a68;
+  color: var(--text-3);
 }
 
 .goal-field > span {
-  color: #4a5260;
-  font: 500 8px/1 var(--mono);
+  color: var(--text-3);
+  font: var(--type-code);
 }
 
 /* ---------- buttons ---------- */
@@ -565,9 +477,8 @@ button:not(:disabled) {
 
 .primary-button {
   border: 1px solid var(--orange-2);
-  background: linear-gradient(180deg, #ff9a52, var(--orange-2));
-  color: #fff7f0;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.22);
+  background: var(--accent-execution);
+  color: var(--execution-text);
 }
 
 .primary-button:not(:disabled):hover {
@@ -1710,7 +1621,7 @@ button:not(:disabled) {
   border: 1px solid rgba(110, 168, 254, 0.45);
   border-radius: 8px;
   color: var(--blue);
-  background: linear-gradient(145deg, rgba(110, 168, 254, 0.14), rgba(16, 20, 28, 0.5));
+  background: var(--surface-selected);
   box-shadow: inset 0 0 15px rgba(110, 168, 254, 0.07);
 }
 
@@ -2027,13 +1938,6 @@ button:not(:disabled) {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
 }
 
-@supports ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
-  .onboarding-card {
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
-  }
-}
-
 .step-index {
   margin-bottom: 16px;
   color: #4a5260;
@@ -2311,7 +2215,15 @@ button:not(:disabled) {
   --space-12: 48px;
   --border-width: 1px;
   --control-height: 36px;
+  --control-height-compact: 28px;
   --touch-target-size: 44px;
+  --selection-mark-width: 2px;
+  --graph-list-item-height: 52px;
+  --run-list-item-height: 48px;
+  --launcher-repository-min: 120px;
+  --launcher-repository-max: 180px;
+  --launcher-goal-min: 160px;
+  --launcher-run-min: 112px;
   --font-size-label: 9px;
   --font-size-caption: 8px;
   --font-size-meta: 10px;
@@ -3267,8 +3179,8 @@ body { background: var(--surface-root); color: var(--text); }
 }
 
 @media (max-width: 860px) {
-  .task-launcher { grid-template-columns: 120px minmax(160px, 1fr) auto; }
-  .run-button { min-width: 112px; width: auto; color: var(--execution-text); }
+  .task-launcher { grid-template-columns: var(--launcher-repository-min) minmax(var(--launcher-goal-min), 1fr) auto; }
+  .run-button { min-width: var(--launcher-run-min); width: auto; color: var(--execution-text); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3280,5 +3192,4 @@ body { background: var(--surface-root); color: var(--text); }
   }
 }
 
-.app-shell .liquid-border::before { display: none; }
 .graph-list-item.selected { background: var(--surface-selected); }

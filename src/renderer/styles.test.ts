@@ -11,10 +11,25 @@ const modalRules = stylesheet.slice(modalRulesStart, modalRulesEnd);
 const canvasRulesStart = activeRules.indexOf(".graph-canvas");
 const canvasRulesEnd = activeRules.indexOf(".launch-dock", canvasRulesStart);
 const canvasRules = activeRules.slice(canvasRulesStart, canvasRulesEnd);
+const listAndLauncherStart = stylesheet.indexOf(".section-heading {");
+const listAndLauncherEnd = stylesheet.indexOf("/* ---------- buttons", listAndLauncherStart);
+const listAndLauncherRules = stylesheet.slice(listAndLauncherStart, listAndLauncherEnd);
 
 describe("active renderer design contract", () => {
   it("contains no selectors for the removed FlexLayout renderer", () => {
     expect(stylesheet).not.toContain(".flexlayout__");
+  });
+
+  it("contains no obsolete decorative visual system", () => {
+    expect(stylesheet).not.toMatch(/\.glass|\.liquid-border|\.workspace-mesh/);
+    expect(stylesheet).not.toMatch(/(?:linear|radial|conic)-gradient|backdrop-filter/);
+  });
+
+  it("routes graph-list and launcher visuals through design tokens", () => {
+    expect(listAndLauncherRules).not.toMatch(/#[\da-f]{3,8}|rgba?\(|gradient/i);
+    expect(listAndLauncherRules).not.toMatch(
+      /^[ \t]+(?:gap|padding|border-radius|font(?:-size)?|line-height|letter-spacing|width|height|min-width|min-height|max-width|max-height)\s*:[^;}]*(?:\d+(?:\.\d+)?(?:px|em|ms))/im,
+    );
   });
 
   it("routes active shell colors through semantic tokens", () => {
