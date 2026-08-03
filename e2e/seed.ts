@@ -6,6 +6,7 @@ import type {
   RunRecord,
 } from "../src/shared/domain";
 import type { HarnessEvent } from "../src/shared/harness";
+import type { ExecutionPlan } from "../src/shared/execution";
 
 /**
  * Predetermined output for one node visit, optionally with fixture-emitted
@@ -40,6 +41,7 @@ export type SeedFixture = {
   settings?: Record<string, string>;
   graphsV2?: GraphDefinitionV2[];
   runs?: RunRecord[];
+  plans?: ExecutionPlan[];
   harnessFixtures?: Record<HarnessId, FixtureHarnessConfig>;
 };
 
@@ -172,11 +174,34 @@ export function mockRun(
   };
 }
 
+export function mockPlan(
+  graph: GraphDefinitionV2,
+  run: RunRecord,
+): ExecutionPlan {
+  return {
+    runId: run.id,
+    graphId: graph.id,
+    graphVersion: graph.version,
+    revision: 0,
+    status: "running",
+    stepCount: 1,
+    nodes: graph.nodes.map((node) => ({
+      nodeId: node.id,
+      status: node.id === run.activeNodeId ? "running" : "waiting",
+      visits: node.id === run.activeNodeId ? 1 : 0,
+    })),
+    edges: graph.edges,
+    patches: [],
+    updatedAt: run.startedAt,
+  };
+}
+
 export type SeedOptions = {
   /** When false, the app boots into onboarding. Defaults to true. */
   onboardingComplete?: boolean;
   graphsV2?: GraphDefinitionV2[];
   runs?: RunRecord[];
+  plans?: ExecutionPlan[];
   harnessFixtures?: Record<HarnessId, FixtureHarnessConfig>;
 };
 
@@ -189,7 +214,12 @@ export function writeSeedFixture(dir: string, options: SeedOptions = {}): string
         : {},
     graphsV2: options.graphsV2 ?? [seedGraph("graph-alpha", "Build & Review")],
     runs: options.runs ?? [],
-    harnessFixtures: options.harnessFixtures,
+    plans: options.plans ?? [],
+    harnessFixtures: options.harnessFixtures ?? {
+      opencode: { nodes: {} },
+      codex: { nodes: {} },
+      "claude-code": { nodes: {} },
+    },
   };
   const fixturePath = path.join(dir, "spire-seed.json");
   writeFileSync(fixturePath, JSON.stringify(fixture, null, 2));

@@ -45,7 +45,10 @@ function fakeServerProcess(): FakeServer {
   const proc = new EventEmitter() as FakeServer;
   proc.stdout = new EventEmitter();
   proc.stderr = new EventEmitter();
-  proc.kill = vi.fn();
+  proc.kill = vi.fn(() => {
+    queueMicrotask(() => proc.emit("exit", 0, "SIGTERM"));
+    return true;
+  });
   queueMicrotask(() => {
     proc.stdout.emit(
       "data",

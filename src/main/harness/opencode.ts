@@ -337,11 +337,34 @@ export class OpenCodeAdapter implements HarnessAdapter {
   }
 
   async close(): Promise<void> {
-    this.server?.kill("SIGTERM");
+    const server = this.server;
     this.server = undefined;
     this.client = undefined;
     this.serverUrl = undefined;
     this.authorization = undefined;
+    if (!server) return;
+    await new Promise<void>((resolve) => {
+      let finished = false;
+      let forceTimer: NodeJS.Timeout | undefined;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (forceTimer) clearTimeout(forceTimer);
+        server.removeListener("exit", finish);
+        resolve();
+      };
+      server.once("exit", finish);
+      if (!server.kill("SIGTERM")) {
+        finish();
+        return;
+      }
+      if (!finished) {
+        forceTimer = setTimeout(() => {
+          server.kill("SIGKILL");
+          finish();
+        }, 1_000);
+      }
+    });
   }
 
   private async ensureClient(): Promise<OpencodeClient> {
