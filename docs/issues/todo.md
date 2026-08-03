@@ -20,15 +20,14 @@ availability.
 
 Selecting a canvas node opens a responsive modal with input, settings, and
 output regions. Edits remain live across close/reopen, Save version persists
-the graph, and keyboard/focus behavior is covered at component and packaged-app
-levels.
+the graph, and keyboard/focus behavior is covered by component contracts.
 
 - Implementation: `91bc784` (responsive dialog) and `41e9300` (integration
   hardening).
 - Verification: `src/renderer/node-dialog/NodeDialog.test.tsx`,
   `src/renderer/node-dialog/selectors.test.ts`,
-  `src/renderer/workspace/WorkspaceShell.test.tsx`, and
-  `e2e/workspace.spec.ts`.
+  `src/renderer/workspace/WorkspaceShell.test.tsx`, plus full `pnpm test`,
+  `pnpm typecheck`, `pnpm lint`, and `pnpm build`.
 
 ## 3. Grid/canvas and fixed workspace — resolved
 
@@ -40,10 +39,13 @@ premium charcoal surface with orange/blue accents.
 
 - Implementation: `eed8f6c` (fixed workspace shell), `6e90219` (modern graph
   canvas), `42896b2` (group hardening), and `5ab0f31` (shared canvas metrics).
-- Verification: renderer workspace/canvas component tests,
-  `e2e/workspace.spec.ts` across 800×600, 1024×700, 1440×900, and 1920×1080,
-  `e2e/visual.spec.ts`, plus full `pnpm test`, `pnpm typecheck`, `pnpm lint`, and
-  `pnpm build`.
+- Verification: renderer workspace/canvas component and contract tests, plus
+  full `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `pnpm build`.
+- Electron E2E status at cleanup commit `0f0e08e`: pending. The focused run
+  used a package built without `SPIRE_ALLOW_INSPECT=1`, so Playwright timed out
+  inside `electron.launch` before app readiness or role selectors were reached.
+  The migrated `e2e/workspace.spec.ts` and `e2e/visual.spec.ts` scenarios were
+  not claimed as passing at that commit.
 
 The former FlexLayout renderer and its dependency are removed. Existing
 workspace-layout rows and their shared/main/preload/database persistence APIs

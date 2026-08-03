@@ -13,6 +13,10 @@ const canvasRulesEnd = activeRules.indexOf(".launch-dock", canvasRulesStart);
 const canvasRules = activeRules.slice(canvasRulesStart, canvasRulesEnd);
 
 describe("active renderer design contract", () => {
+  it("contains no selectors for the removed FlexLayout renderer", () => {
+    expect(stylesheet).not.toContain(".flexlayout__");
+  });
+
   it("routes active shell colors through semantic tokens", () => {
     expect(activeRules).not.toMatch(/#[\da-f]{3,8}/i);
     expect(stylesheet.slice(contractStart, activeRulesStart)).toContain(
