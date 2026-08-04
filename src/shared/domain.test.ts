@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { graphDefinitionSchema, graphDefinitionV2Schema } from "./domain";
+import {
+  graphDefinitionSchema,
+  graphDefinitionV2Schema,
+  nodeIntegrationSchema,
+} from "./domain";
 
 const graph = {
   id: "graph-1",
@@ -340,5 +344,106 @@ describe("graphDefinitionV2Schema", () => {
 
     const badGraph = { ...structuredClone(v2Graph), maxIterations: 3 };
     expect(() => graphDefinitionV2Schema.parse(badGraph)).toThrow();
+  });
+});
+
+describe("agent node new fields", () => {
+  it("applies defaults when the new fields are absent", () => {
+    const parsed = graphDefinitionV2Schema.parse(v2Graph);
+    const node = parsed.nodes[0];
+    if (node.kind !== "agent") return;
+    expect(node.thinkingEffort).toBe("medium");
+    expect(node.skills).toEqual([]);
+    expect(node.goal).toBe("");
+    expect(node.subGoals).toEqual([]);
+    expect(node.integrations).toEqual([]);
+  });
+
+  it("round-trips explicit values", () => {
+    const explicit = structuredClone(v2Graph);
+    explicit.nodes = [
+      {
+        ...v2Agent,
+        thinkingEffort: "high" as const,
+        skills: ["typescript", "testing"],
+        goal: "Ship the feature",
+        subGoals: ["Write tests", "Refactor"],
+        integrations: [
+          {
+            type: "mcp" as const,
+            name: "codegraph",
+            description: "Code intelligence",
+            enabled: true,
+          },
+        ],
+      },
+    ];
+    const parsed = graphDefinitionV2Schema.parse(explicit);
+    const node = parsed.nodes[0];
+    if (node.kind !== "agent") return;
+    expect(node.thinkingEffort).toBe("high");
+    expect(node.skills).toEqual(["typescript", "testing"]);
+    expect(node.goal).toBe("Ship the feature");
+    expect(node.subGoals).toEqual(["Write tests", "Refactor"]);
+    expect(node.integrations).toEqual([
+      {
+        type: "mcp",
+        name: "codegraph",
+        description: "Code intelligence",
+        enabled: true,
+      },
+    ]);
+  });
+});
+
+describe("nodeIntegrationSchema", () => {
+  it("rejects an empty name", () => {
+    expect(() =>
+      nodeIntegrationSchema.parse({ type: "mcp", name: "" }),
+    ).toThrow();
+  });
+
+  it("rejects an unknown type", () => {
+    expect(() =>
+      nodeIntegrationSchema.parse({ type: "plugin", name: "x" }),
+    ).toThrow();
+  });
+});
+
+describe("checkpoint and subgraph nodes", () => {
+  it("still parse and do not gain the new keys", () => {
+    const mixed = structuredClone(v2Graph);
+    mixed.nodes = [
+      {
+        kind: "checkpoint" as const,
+        id: "review-point",
+        name: "Human Review",
+        mode: "manual" as const,
+        position: { x: 200, y: 0 },
+      },
+      {
+        kind: "subgraph" as const,
+        id: "child",
+        name: "Child Pipeline",
+        graphId: "graph-v2-2",
+        graphVersion: 4,
+        position: { x: 400, y: 0 },
+      },
+    ];
+    const parsed = graphDefinitionV2Schema.parse(mixed);
+    const checkpoint = parsed.nodes[0];
+    const subgraph = parsed.nodes[1];
+    if (checkpoint.kind !== "checkpoint") return;
+    if (subgraph.kind !== "subgraph") return;
+    expect(checkpoint).not.toHaveProperty("thinkingEffort");
+    expect(checkpoint).not.toHaveProperty("skills");
+    expect(checkpoint).not.toHaveProperty("goal");
+    expect(checkpoint).not.toHaveProperty("subGoals");
+    expect(checkpoint).not.toHaveProperty("integrations");
+    expect(subgraph).not.toHaveProperty("thinkingEffort");
+    expect(subgraph).not.toHaveProperty("skills");
+    expect(subgraph).not.toHaveProperty("goal");
+    expect(subgraph).not.toHaveProperty("subGoals");
+    expect(subgraph).not.toHaveProperty("integrations");
   });
 });
