@@ -208,6 +208,18 @@ export class CollaborationWorkspace {
     sections.push(`# Context for ${node.name} (${node.id})`);
     sections.push(`## Run objective\n\n${this.goal}`);
     sections.push(`## Your job\n\n${node.job}`);
+    sections.push(`## Goal\n\n${node.goal || this.goal || "(none set)"}`);
+    if (node.subGoals.length > 0) {
+      sections.push(
+        `## Sub-goals\n\n${node.subGoals.map((sub) => `- ${sub.trim()}`).join("\n")}`,
+      );
+    }
+    if (node.skills.length > 0) {
+      sections.push(
+        `## Skills\n\n${node.skills.map((skill) => `- ${skill}`).join("\n")}`,
+      );
+    }
+    sections.push(`## Thinking effort\n\n${node.thinkingEffort}`);
 
     const access =
       node.access.mode === "workspace-write"
