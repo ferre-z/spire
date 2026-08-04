@@ -221,4 +221,32 @@ describe("useNodeTraces (scoped live trace hook)", () => {
     expect(latest!.events).toEqual([]);
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
+
+  it("preserves a live event that arrives while the initial fetch is pending", async () => {
+    const scoped = { runId: "run-1", nodeId: "node-1" };
+    let resolveQuery!: (value: TracePage) => void;
+    queryTraces.mockReturnValue(
+      new Promise<TracePage>((resolve) => {
+        resolveQuery = resolve;
+      }),
+    );
+
+    await renderProbe("run-1", "node-1");
+    expect(latest!.loading).toBe(true);
+
+    // Live event fires while the query promise is still pending.
+    act(() => {
+      traceListener!(makeEvent(9, scoped));
+    });
+    expect(latest!.events.map((event) => event.sequence)).toEqual([9]);
+
+    // Now the fetch resolves with its own (older) events.
+    await act(async () => {
+      resolveQuery(page([makeEvent(1, scoped), makeEvent(2, scoped)]));
+    });
+
+    // Both the fetched events AND the live event survive the resolution.
+    expect(latest!.loading).toBe(false);
+    expect(latest!.events.map((event) => event.sequence)).toEqual([1, 2, 9]);
+  });
 });

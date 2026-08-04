@@ -76,8 +76,11 @@ export function useNodeTraces(
     };
 
     // Subscribe before the initial query: live events delivered while the
-    // page is in flight are deduped by sequence on append, so the overlap
-    // race is safe and no event is missed in between.
+    // page is in flight are appended to state immediately. When the query
+    // resolves we MERGE the fetched pages into the current state (rather than
+    // replacing it) so those in-flight live events are preserved; dedupe by
+    // sequence keeps the overlap between the fetched pages and the live stream
+    // from producing duplicates.
     const unsubscribe = window.spire.onTraceEvent((event) => {
       if (event.runId !== runId || event.nodeId !== nodeId) return;
       setEvents((current) => {
@@ -90,7 +93,13 @@ export function useNodeTraces(
     void fetchPage(undefined, 0, [])
       .then((fetched) => {
         if (cancelled) return;
-        setEvents(capEvents(dedupeAscending(fetched)));
+        // Merge into current state so live events that arrived while the query
+        // was in flight are preserved rather than dropped by a replace.
+        setEvents((current) => {
+          const merged = [...current, ...fetched];
+          merged.sort((a, b) => a.sequence - b.sequence);
+          return capEvents(dedupeAscending(merged));
+        });
         setLoading(false);
       })
       .catch((error: unknown) => {
