@@ -2,6 +2,7 @@
 import "../styles/global.css";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
+import GrainField from "../components/GrainField.tsx";
 
 interface Props {
   title?: string;
@@ -32,11 +33,16 @@ const pageTitle = title.endsWith(" · Spire") || title === "Spire"
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body>
+    <GrainField client:load />
     <Nav />
     <main id="main">
       <slot />
     </main>
     <Footer />
+
+    <style>
+      main { position: relative; z-index: 1; }
+    </style>
 
     <script>
       // scroll-reveal observer across static sections

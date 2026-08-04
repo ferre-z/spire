@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import HeroGraph from "../components/HeroGraph.tsx";
+import FeatureExplorer from "../components/FeatureExplorer.tsx";
 import Logo from "../components/Logo.astro";
 import "../styles/landing.css";
 
@@ -10,36 +11,42 @@ const features = [
     glyph: "◉",
     color: "flow",
     title: "Visual workflow graphs",
+    tag: "graph · durable",
     body: "Assemble bespoke agent tasks into durable, versioned graphs. Compile a graph into a run plan the scheduler can actually execute — and patch safely at checkpoints.",
   },
   {
     glyph: "◆",
     color: "flow",
     title: "Bespoke agent nodes",
+    tag: "node · configurable",
     body: "Each node is a job string routed through OpenCode, Codex, or Claude Code. Behavior comes from configuration — job, harness, model, access, and authority — not a title.",
   },
   {
     glyph: "▣",
     color: "decision",
     title: "Decisions & routing",
+    tag: "edge · typed",
     body: "Decision nodes pick branches; typed edges carry dependency, hand-off, review, approval, and escalation. Route on success, failure, or an explicit selection.",
   },
   {
     glyph: "▲",
     color: "gate",
     title: "Controlled checkpoints",
+    tag: "gate · resume",
     body: "Gates pause for scope validation and workspace merges. Automatic gates validate and merge; manual gates wait until you explicitly resume.",
   },
   {
     glyph: "◈",
     color: "flow",
     title: "Isolated git worktrees",
+    tag: "safety · private",
     body: "Every run gets an isolated worktree. Agents branch into private node worktrees, and Spire never commits, merges, or edits your source checkout.",
   },
   {
     glyph: "✦",
     color: "decision",
     title: "MCP control plane",
+    tag: "control · socket",
     body: "Drive every control capability from any MCP client. State, runs, graphs, plan patches, and live trace events over an authenticated local socket.",
   },
 ];
@@ -127,9 +134,9 @@ const harnesses = [
         </p>
 
         <div class="hero-cta">
-          <a class="btn mono" href="/docs">Get started
+          <a class="btn mono magnet" href="/docs">Get started
             <span aria-hidden="true">→</span></a>
-          <a class="btn btn-ghost mono" href="#workflow">See the workflow</a>
+          <a class="btn btn-ghost mono magnet" href="#workflow">See the workflow</a>
         </div>
 
         <div class="hero-stats mono">
@@ -150,7 +157,7 @@ const harnesses = [
     </div>
   </header>
 
-  <!-- ============ FEATURES ============ -->
+  <!-- ============ FEATURES (scroll-pinned explorer) ============ -->
   <section class="section" id="features">
     <div class="container">
       <div class="head" data-reveal>
@@ -162,17 +169,8 @@ const harnesses = [
           your working tree.
         </p>
       </div>
-
-      <div class="feat-grid">
-        {features.map((f, i) => (
-          <article class="feat-card" data-reveal data-reveal-delay={String(i % 3)}>
-            <span class={`feat-glyph color-${f.color}`}>{f.glyph}</span>
-            <h3>{f.title}</h3>
-            <p>{f.body}</p>
-          </article>
-        ))}
-      </div>
     </div>
+    <FeatureExplorer features={features} client:load />
   </section>
 
   <!-- ============ WORKFLOW ============ -->
@@ -352,4 +350,54 @@ pnpm start</code></pre>
   };
   addEventListener("scroll", upd8, { passive: true });
   upd8();
+
+  // ---- magnetic CTAs ----
+  const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!prefersReduced) {
+    document.querySelectorAll<HTMLElement>(".magnet").forEach((el) => {
+      const strength = 14;
+      let raf = 0;
+      el.addEventListener("pointermove", (e) => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          const r = el.getBoundingClientRect();
+          const dx = e.clientX - (r.left + r.width / 2);
+          const dy = e.clientY - (r.top + r.height / 2);
+          el.style.transform = `translate(${dx * 0.18}px, ${dy * 0.3}px)`;
+        });
+      });
+      el.addEventListener("pointerleave", () => {
+        cancelAnimationFrame(raf);
+        el.style.transform = "";
+      });
+    });
+
+    // ---- subtle hero parallax on scroll ----
+    const heroTitle = document.querySelector<HTMLElement>(".hero-title");
+    const heroFig = document.querySelector<HTMLElement>(".hero-fig-wrap");
+    if (heroTitle) {
+      addEventListener(
+        "scroll",
+        () => {
+          const y = window.scrollY;
+          if (y > 900) return;
+          heroTitle.style.transform = `translateY(${y * 0.18}px)`;
+          heroTitle.style.opacity = `${Math.max(0, 1 - y / 500)}`;
+        },
+        { passive: true }
+      );
+    }
+    if (heroFig) {
+      addEventListener(
+        "scroll",
+        () => {
+          const y = window.scrollY;
+          if (y > 1400) return;
+          heroFig.style.transform = `perspective(900px) translateY(${y * 0.06}px)`;
+          heroFig.style.opacity = `${Math.max(0, 1 - y / 760)}`;
+        },
+        { passive: true }
+      );
+    }
+  }
 </script>
