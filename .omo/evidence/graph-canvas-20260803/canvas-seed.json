@@ -1,0 +1,103 @@
+{
+  "settings": { "onboardingComplete": "true" },
+  "graphsV2": [
+    {
+      "id": "canvas-qa",
+      "name": "Premium canvas verification",
+      "version": 1,
+      "createdAt": "2026-08-03T08:00:00.000Z",
+      "maxSteps": 20,
+      "groups": [{ "id": "delivery", "name": "Delivery coordination group with a deliberately long label" }],
+      "nodes": [
+        {
+          "kind": "agent",
+          "id": "architect",
+          "name": "Architecture and implementation coordinator with an intentionally long name",
+          "job": "Plan the work while preserving local canvas interaction state and reporting concise evidence.",
+          "harnessId": "opencode",
+          "modelId": "provider/organization/very-long-production-model-identifier-2026-08",
+          "access": { "mode": "read-only", "writeScopes": [] },
+          "authority": { "scope": "self", "actions": [] },
+          "activation": "all",
+          "maxVisits": 2,
+          "position": { "x": 80, "y": 80 },
+          "groupId": "delivery"
+        },
+        {
+          "kind": "decision",
+          "id": "routing",
+          "name": "Review routing",
+          "job": "Choose the validated path.",
+          "harnessId": "codex",
+          "modelId": "openai/gpt-5.2-codex",
+          "access": { "mode": "read-only", "writeScopes": [] },
+          "authority": { "scope": "self", "actions": [] },
+          "activation": "all",
+          "maxVisits": 1,
+          "position": { "x": 430, "y": 110 }
+        },
+        {
+          "kind": "checkpoint",
+          "id": "approval",
+          "name": "Manual approval",
+          "mode": "manual",
+          "position": { "x": 720, "y": 260 }
+        },
+        {
+          "kind": "subgraph",
+          "id": "followup",
+          "name": "Follow-up workflow",
+          "graphId": "canvas-qa",
+          "position": { "x": 430, "y": 390 }
+        }
+      ],
+      "edges": [
+        {
+          "id": "architect-routing",
+          "source": "architect",
+          "target": "routing",
+          "kind": "handoff",
+          "when": "success",
+          "label": "Ready for review"
+        },
+        {
+          "id": "routing-approval",
+          "source": "routing",
+          "target": "approval",
+          "kind": "review",
+          "when": "success",
+          "label": "Approval required"
+        }
+      ]
+    }
+  ],
+  "harnessFixtures": {
+    "opencode": {
+      "nodes": {
+        "architect": [{
+          "output": {
+            "status": "succeeded",
+            "summary": "Architecture ready",
+            "artifacts": [],
+            "messages": [],
+            "selectedEdgeIds": ["architect-routing"]
+          }
+        }]
+      }
+    },
+    "codex": {
+      "nodes": {
+        "routing": [{
+          "output": {
+            "status": "succeeded",
+            "summary": "Route approved",
+            "artifacts": [],
+            "messages": [],
+            "selectedEdgeIds": ["routing-approval"]
+          }
+        }]
+      }
+    },
+    "claude-code": { "nodes": {} }
+  }
+}

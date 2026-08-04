@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-08-03T05:29:25.690Z",
+  "baselineHead": "91bc784b1c3f8f1aec9b9602747638c5968c64ad",
+  "workingDiffSha256": "25bcca4eaef7284ccc2216abc3c7190514e4f2324dc9b738ee6e584ddba75237",
+  "stylesSha256": "ca88b141b733a814643aa68a5e9aa95c41f7e6ef8314356898ecb7df53393b5c",
+  "wideBox": {
+    "x": 230.40625,
+    "y": 108,
+    "width": 979.1875,
+    "height": 684
+  },
+  "rootAriaHidden": null,
+  "bodyPointerEvents": "none",
+  "dialogMotion": {
+    "animationName": "none",
+    "animationDuration": "1e-05s",
+    "transitionDuration": "1e-05s"
+  },
+  "overlayMotion": {
+    "animationName": "none",
+    "animationDuration": "1e-05s"
+  },
+  "backgroundFocusContained": true,
+  "tabFocusContained": true,
+  "inputMetrics": {
+    "clientWidth": 974,
+    "scrollWidth": 974,
+    "clientHeight": 527,
+    "scrollHeight": 3263
+  },
+  "outputMetrics": {
+    "clientWidth": 974,
+    "scrollWidth": 974,
+    "clientHeight": 527,
+    "scrollHeight": 3320
+  },
+  "rovingSelected": "true",
+  "rovingFocused": true,
+  "focusRestored": true,
+  "activeAfterClose": "builder",
+  "consoleErrors": []
+}

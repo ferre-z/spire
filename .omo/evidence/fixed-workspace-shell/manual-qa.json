@@ -1,0 +1,59 @@
+{
+  "desktop": {
+    "width": 1440,
+    "height": 900,
+    "horizontalOverflow": 0,
+    "verticalOverflow": 0,
+    "regions": [
+      "Activity destinations",
+      "Graph navigation",
+      "Graph canvas",
+      "Graph context",
+      "Output utilities",
+      "Launch graph"
+    ],
+    "gridColumns": "56px 248px 772px 312px 52px"
+  },
+  "compact": {
+    "width": 1024,
+    "height": 700,
+    "horizontalOverflow": 0,
+    "verticalOverflow": 0,
+    "regions": [
+      "Activity destinations",
+      "Graph navigation",
+      "Graph canvas",
+      "Graph context",
+      "Output utilities",
+      "Launch graph"
+    ],
+    "gridColumns": "56px 916px 52px"
+  },
+  "minimum": {
+    "width": 800,
+    "height": 600,
+    "horizontalOverflow": 0,
+    "verticalOverflow": 0,
+    "regions": [
+      "Activity destinations",
+      "Graph navigation",
+      "Graph canvas",
+      "Graph context",
+      "Output utilities",
+      "Launch graph"
+    ],
+    "gridColumns": "56px 692px 52px"
+  },
+  "drawerWidth": "440px",
+  "navigationOverlayVisible": true,
+  "contextOverlayVisible": true,
+  "f6Region": "Activity destinations",
+  "commandMenuVisible": true,
+  "consoleErrors": [],
+  "onboarding": {
+    "harnessRows": 3,
+    "hasCredentialLanguage": false,
+    "horizontalOverflow": 0,
+    "verticalOverflow": 0
+  }
+}

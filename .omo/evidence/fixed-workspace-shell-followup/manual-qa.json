@@ -1,0 +1,79 @@
+{
+  "desktop": {
+    "width": 1440,
+    "height": 900,
+    "horizontalOverflow": 0,
+    "verticalOverflow": 0,
+    "gridColumns": "56px 248px 772px 312px 52px",
+    "regions": [
+      "Activity destinations",
+      "Graph navigation",
+      "Graph canvas",
+      "Graph context",
+      "Output utilities",
+      "Launch graph"
+    ]
+  },
+  "currentDestination": "page",
+  "drawerWidth": "440px",
+  "drawerTabWrapped": true,
+  "drawerFocusRestored": true,
+  "commandShiftTabWrapped": true,
+  "commandFocusRestored": true,
+  "navigationOverlayVisible": true,
+  "compact": {
+    "width": 1024,
+    "height": 700,
+    "horizontalOverflow": 0,
+    "verticalOverflow": 0,
+    "gridColumns": "56px 916px 52px",
+    "regions": [
+      "Activity destinations",
+      "Graph navigation",
+      "Graph canvas",
+      "Graph context",
+      "Output utilities",
+      "Launch graph"
+    ]
+  },
+  "contextOverlayVisible": true,
+  "minimum": {
+    "width": 800,
+    "height": 600,
+    "horizontalOverflow": 0,
+    "verticalOverflow": 0,
+    "gridColumns": "56px 692px 52px",
+    "regions": [
+      "Activity destinations",
+      "Graph navigation",
+      "Graph canvas",
+      "Graph context",
+      "Output utilities",
+      "Launch graph"
+    ]
+  },
+  "onboarding": {
+    "harnessRows": 3,
+    "hasCredentialLanguage": false,
+    "width": 1024,
+    "height": 760,
+    "horizontalOverflow": 0,
+    "verticalOverflow": 0,
+    "regions": []
+  },
+  "consoleErrors": [],
+  "checks": {
+    "desktopNoOverflow": true,
+    "compactNoOverflow": true,
+    "minimumNoOverflow": true,
+    "onboardingNoOverflow": true,
+    "drawerWidth": true,
+    "overlays": true,
+    "currentDestination": true,
+    "drawerFocus": true,
+    "commandFocus": true,
+    "onboardingRows": true,
+    "onboardingCopy": true,
+    "console": true
+  }
+}
