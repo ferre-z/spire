@@ -1,33 +1,33 @@
 /* ============================================================
    Spire design system — professional dockable workspace
-   Charcoal/graphite base, light-blue structural accents,
+   Charcoal/graphite base, neutral grey/white accents,
    orange execution accents. Green/red/amber stay semantic.
    ============================================================ */
 
 :root {
   color-scheme: dark;
   font-family: "Inter Variable", "Inter", system-ui, sans-serif;
-  color: #e9ebf1;
-  background: #0a0b0e;
+  color: #e9e9e9;
+  background: #0a0a0a;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 
-  --bg: #0a0b0e;
-  --bg-2: #0d0f13;
-  --panel: #101216;
-  --panel-2: #14161b;
-  --panel-3: #1a1d24;
-  --border: #23262e;
-  --border-soft: #191c22;
-  --text: #e9ebf1;
-  --text-2: #a0a7b4;
-  --text-3: #6d7482;
+  --bg: #0a0a0a;
+  --bg-2: #0d0d0d;
+  --panel: #101010;
+  --panel-2: #141414;
+  --panel-3: #1a1a1a;
+  --border: #232323;
+  --border-soft: #191919;
+  --text: #e9e9e9;
+  --text-2: #a0a0a0;
+  --text-3: #6d6d6d;
 
-  --blue: #6ea8fe;
-  --blue-2: #4f86e8;
-  --blue-soft: rgba(110, 168, 254, 0.12);
-  --blue-line: rgba(110, 168, 254, 0.4);
-  --focus: #8fbdff;
+  --blue: #e9e9e9;
+  --blue-2: #c0c0c0;
+  --blue-soft: rgba(233, 233, 233, 0.12);
+  --blue-line: rgba(233, 233, 233, 0.4);
+  --focus: #e9e9e9;
 
   --orange: #ff8a3d;
   --orange-2: #e8661a;
@@ -2177,17 +2177,17 @@ button:not(:disabled) {
 .status-off { color: var(--red); }
 
 :root {
-  --surface-root: #0a0b0e;
-  --surface-rail: #0d0f13;
-  --surface-panel: #101216;
-  --surface-raised: #14161b;
-  --surface-active: #1a1d24;
-  --accent-navigation: #6ea8fe;
+  --surface-root: #0a0a0a;
+  --surface-rail: #0d0d0d;
+  --surface-panel: #101010;
+  --surface-raised: #141414;
+  --surface-active: #1a1a1a;
+  --accent-navigation: #e9e9e9;
   --accent-execution: #ff8a3d;
-  --border-hover: #394050;
-  --border-interactive: #3b4f6d;
-  --border-selected: #2b405f;
-  --surface-selected: #162032;
+  --border-hover: #333333;
+  --border-interactive: #3a3a3a;
+  --border-selected: #3a3a3a;
+  --surface-selected: #1f1f1f;
   --execution-border: #d96d2b;
   --execution-border-hover: #ffad76;
   --execution-hover: #ff9a57;
@@ -2201,18 +2201,18 @@ button:not(:disabled) {
   --status-warning-ring: #eeb96859;
   --status-error-ring: #ff6b7259;
   --status-warning-surface: #eeb96814;
-  --status-neutral-border: #2a2f39;
-  --status-neutral-surface: #78829114;
-  --status-neutral-text: #8a93a3;
-  --scrollbar-thumb: #2a2e37;
+  --status-neutral-border: #2a2a2a;
+  --status-neutral-surface: #8a8a8a14;
+  --status-neutral-text: #8a8a8a;
+  --scrollbar-thumb: #2a2a2a;
   --surface-subtle: #ffffff05;
-  --surface-toolbar: #0d0f1399;
+  --surface-toolbar: #0d0d0d99;
   --overlay-scrim: #050608b8;
   --shadow-soft: #00000038;
   --shadow-panel: #00000052;
   --shadow-overlay: #00000066;
   --shadow-command: #00000073;
-  --navigation-inset: #6ea8fe66;
+  --navigation-inset: #e9e9e966;
   --execution-inset: #ff8a3d66;
   --space-1: 4px;
   --space-2: 8px;
@@ -2272,10 +2272,10 @@ button:not(:disabled) {
   --node-dialog-compact-inset: 24px;
   --node-dialog-shadow-blur: 72px;
   --node-dialog-textarea-min-height: 96px;
-  --canvas-grid-dot: #242830;
-  --canvas-edge-idle: #4a5160;
-  --canvas-minimap-node: #394050;
-  --canvas-minimap-mask: #0a0b0ec7;
+  --canvas-grid-dot: #242424;
+  --canvas-edge-idle: #4a4a4a;
+  --canvas-minimap-node: #393939;
+  --canvas-minimap-mask: #0a0a0ac7;
   --canvas-edge-label-font: var(--type-label);
   --radius-compact: 4px;
   --radius-control: 6px;
