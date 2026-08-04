@@ -66,10 +66,13 @@ type RuntimeResources = {
 };
 
 async function closeRuntime(resources: RuntimeResources): Promise<void> {
-  resources.harness.close();
   try {
-    await resources.registry.closeAll();
+    resources.harness.close();
   } finally {
-    resources.database.close();
+    try {
+      await resources.registry.closeAll();
+    } finally {
+      resources.database.close();
+    }
   }
 }
