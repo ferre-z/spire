@@ -1,15 +1,14 @@
 import { app, BrowserWindow, nativeTheme } from "electron";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  createCoordinatorRuntime,
+  type CoordinatorRuntime,
+} from "../coordinator/runtime";
 import { ControlSocketServer } from "./control/socket-server";
-import { SpireControl } from "./control/spire-control";
 import { SpireDatabase } from "./database";
 import { detectEnvironment, registerIpc, sendRunEvent } from "./ipc";
-import { OpenCodeHarness } from "./harness/opencode";
-import { createDefaultHarnessRegistry } from "./harness/registry";
-import { RunEngine } from "./run-engine";
 import { isAllowedPopoutUrl } from "./window-policy";
-import { LocalWorktreeBackend } from "./worktree";
 import type { GraphDefinition, GraphDefinitionV2, HarnessId, RunRecord } from "../shared/domain";
 import type { HarnessRegistry } from "../shared/harness";
 
@@ -17,8 +16,7 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 let mainWindow: BrowserWindow | null = null;
-let database: SpireDatabase | undefined;
-let harness: OpenCodeHarness | undefined;
+let runtime: CoordinatorRuntime | undefined;
 let controlSocket: ControlSocketServer | undefined;
 let shutdownStarted = false;
 
@@ -135,15 +133,15 @@ void app.whenReady().then(async () => {
   // SPIRE_USER_DATA lets E2E tests run against an isolated, pre-seeded
   // database instead of the real user profile.
   const dataRoot = process.env.SPIRE_USER_DATA ?? app.getPath("userData");
-  database = new SpireDatabase(path.join(dataRoot, "spire.sqlite"));
   // E2E-only fixture seeding: SPIRE_SEED points at a JSON file with
   // settings/graphs/runs so UI tests never touch OpenRouter.
   let seed: SeedFixture | undefined;
   if (process.env.SPIRE_SEED) {
-    seed = seedFromFixture(database, process.env.SPIRE_SEED);
+    const seedDatabase = new SpireDatabase(path.join(dataRoot, "spire.sqlite"));
+    seed = seedFromFixture(seedDatabase, process.env.SPIRE_SEED);
+    seedDatabase.close();
   }
-  harness = new OpenCodeHarness();
-  let registry: HarnessRegistry;
+  let registry: HarnessRegistry | undefined;
   if (seed?.harnessFixtures) {
     // Fixture harnesses: deterministic, CLI-free run execution for E2E tests.
     // Loaded dynamically so test-only code never ships in the production bundle.
@@ -151,32 +149,17 @@ void app.whenReady().then(async () => {
     registry = createFixtureHarnessRegistry(
       seed.harnessFixtures as Record<HarnessId, import("./harness/fixture").FixtureHarnessConfig>,
     );
-  } else {
-    registry = createDefaultHarnessRegistry(dataRoot);
   }
-  const backend = new LocalWorktreeBackend(path.join(dataRoot, "worktrees"));
-  const journal = database.createTraceJournal();
-  const engine = new RunEngine(
-    database,
-    registry,
-    backend,
-    (event) => sendRunEvent(mainWindow, event),
-    journal,
+  runtime = await createCoordinatorRuntime({
     dataRoot,
-  );
-  const control = new SpireControl({
-    database,
-    engine,
-    harness,
     registry,
-    backend,
-    journal,
     environment: { appVersion: app.getVersion(), ...detectEnvironment() },
+    notify: (event) => sendRunEvent(mainWindow, event),
   });
-  registerIpc(control, () => mainWindow);
+  registerIpc(runtime.control, () => mainWindow);
   // Local control socket for same-user processes (the MCP stdio sidecar).
   // Failure to bind must not take down the app — control stays over IPC.
-  controlSocket = new ControlSocketServer({ control, baseDir: dataRoot });
+  controlSocket = new ControlSocketServer({ control: runtime.control, baseDir: dataRoot });
   void controlSocket.start().catch((error: unknown) => {
     console.error("Failed to start the control socket:", error);
   });
@@ -192,20 +175,20 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-  // The control socket closes before the database: before-quit is
-  // synchronous, so defer the quit once while the socket shuts down.
-  if (controlSocket && !shutdownStarted) {
+  // The control socket closes before the coordinator runtime's database:
+  // before-quit is synchronous, so defer the quit once while they shut down.
+  if (!shutdownStarted) {
     shutdownStarted = true;
     event.preventDefault();
-    void controlSocket
-      .close()
+    void (controlSocket?.close() ?? Promise.resolve())
       // Quit even if socket teardown fails — never hang shutdown.
+      .then(
+        () => runtime?.close(),
+        () => runtime?.close(),
+      )
       .then(
         () => app.quit(),
         () => app.quit(),
       );
-    return;
   }
-  harness?.close();
-  database?.close();
 });
