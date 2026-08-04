@@ -1,7 +1,9 @@
 /* ============================================================
    Spire — design system / global styles
-   "Control console" aesthetic: graphite canvas, hairline rules,
-   mono instrument labels, node/edge color language.
+   "Deep instrument" aesthetic: a split-tone graphite habitat over
+   a cursor-reactive aurora mesh + film grain, layered glass panels,
+   hairline gradient borders, and a restrained node/edge color
+   language that encodes the graph, not just decor.
    ============================================================ */
 
 @font-face {
@@ -16,49 +18,62 @@
 }
 
 :root {
-  /* ---- canvas ---- */
-  --bg-0: #07090b;
-  --bg-1: #0b0e11;
-  --bg-2: #10151a;
-  --surface: #151b21;
-  --surface-2: #1b232b;
+  /* ---- canvas (split-tone graphite leaning blue-black) ---- */
+  --bg-0: #06070c;
+  --bg-1: #0a0c13;
+  --bg-2: #0f131c;
+  --surface: #141927;
+  --surface-2: #1a2130;
+  --glass: rgba(20, 25, 39, 0.55);
 
   /* ---- ink ---- */
-  --ink: #e7ecef;
-  --ink-dim: #9ba7b3;
-  --ink-faint: #58666f;
-  --ink-faint-2: #3c474f;
+  --ink: #e6ebf1;
+  --ink-dim: #98a4b3;
+  --ink-faint: #5f6b7a;
+  --ink-faint-2: #3d4756;
 
   /* ---- hairline ---- */
-  --line: rgba(148, 167, 184, 0.12);
-  --line-strong: rgba(148, 167, 184, 0.22);
+  --line: rgba(152, 174, 198, 0.12);
+  --line-strong: rgba(152, 174, 198, 0.24);
 
-  /* ---- node / edge color language ----
-     encode the graph block kinds, not just decor */
-  --flow: #4ee6c3;   /* agent / running pipeline   */
-  --flow-soft: rgba(78, 230, 195, 0.14);
-  --gate: #f5b04a;   /* checkpoint / gate          */
-  --gate-soft: rgba(245, 176, 74, 0.14);
-  --decision: #a98cff; /* decision node               */
-  --decision-soft: rgba(169, 140, 255, 0.14);
+  /* ---- node / edge color language ---- */
+  --flow: #43e2be;   /* agent / running pipeline   */
+  --flow-soft: rgba(67, 226, 190, 0.14);
+  --gate: #f2b45c;   /* checkpoint / gate          */
+  --gate-soft: rgba(242, 180, 92, 0.14);
+  --decision: #9d85ff; /* decision node            */
+  --decision-soft: rgba(157, 133, 255, 0.14);
   --warn: #ff7a80;
 
-  /* ---- legacy text accents ---- */
+  /* ---- ambient glow ---- */
+  --aura-flow: rgba(67, 226, 190, 0.34);
+  --aura-sky: rgba(63, 118, 255, 0.30);
+  --aura-violet: rgba(157, 133, 255, 0.30);
+
   --accent: var(--flow);
   --accent-2: var(--decision);
+  --grad-primary: linear-gradient(120deg, var(--flow), #5fb6ff 55%, var(--decision));
 
-  --grad-primary: linear-gradient(120deg, var(--flow), #38bdf8 60%, var(--decision));
-
+  /* ---- radius / type ---- */
   --radius-xs: 6px;
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 20px;
+  --radius-xl: 28px;
 
   --mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
   --bez-fast: cubic-bezier(0.22, 1, 0.36, 1);
   --bez-snap: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ---- layered shadow / border system ---- */
+  --sh-1: 0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 18px 40px -24px rgba(0, 0, 0, 0.8);
+  --sh-2: 0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 30px 70px -30px rgba(0, 0, 0, 0.85);
+  --sh-glow: 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 30px 80px -30px rgba(0, 0, 0, 0.9);
 
   --maxw: 1180px;
   --nav-h: 64px;
@@ -87,38 +102,70 @@ body {
   overflow-x: clip;
 }
 
-/* dotted graph canvas backdrop */
+/* ---- static habitat base (the island layers grain + moving aurora on top) ---- */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
+  background:
+    radial-gradient(130% 100% at 50% -10%, #0c111c 0%, transparent 55%),
+    linear-gradient(180deg, #080a10 0%, #05060a 100%);
+}
+
+/* fragile-metallic fiducial grid, very faint, fades away from top */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
   background-image:
-    radial-gradient(rgba(148, 167, 184, 0.09) 1px, transparent 1px),
-    radial-gradient(rgba(148, 167, 184, 0.05) 1px, transparent 1px);
-  background-size: 26px 26px, 26px 26px;
-  background-position: 0 0, 13px 13px;
-  -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 30%, transparent 100%);
-  mask-image: radial-gradient(120% 90% at 50% 0%, #000 30%, transparent 100%);
+    repeating-linear-gradient(90deg, rgba(152, 174, 198, 0.03) 0 1px, transparent 1px 84px),
+    repeating-linear-gradient(0deg, rgba(152, 174, 198, 0.025) 0 1px, transparent 1px 84px);
+  -webkit-mask-image: radial-gradient(110% 90% at 50% 0%, #000 25%, transparent 100%);
+  mask-image: radial-gradient(110% 90% at 50% 0%, #000 25%, transparent 100%);
+}
+
+/* grain + moving aurora come from the GrainField island (.field) */
+.field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.field__blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  will-change: transform;
+}
+.field__grain {
+  position: absolute;
+  inset: -2% -2%;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  will-change: transform;
+}
+.field__vig {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 100% at 50% 20%, transparent 40%, rgba(3, 4, 7, 0.7) 100%);
 }
 
 h1, h2, h3, h4 {
   margin: 0;
-  font-weight: 650;
+  font-weight: 620;
   letter-spacing: -0.02em;
-  line-height: 1.12;
+  line-height: 1.08;
   color: var(--ink);
 }
 
-p {
-  margin: 0;
-}
+p { margin: 0; }
 
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
+a { color: var(--accent); text-decoration: none; }
 
 :focus-visible {
   outline: 2px solid var(--flow);
@@ -126,14 +173,9 @@ a {
   border-radius: 4px;
 }
 
-::selection {
-  background: var(--flow);
-  color: #04100c;
-}
+::selection { background: var(--flow); color: #04100c; }
 
-.mono {
-  font-family: var(--mono);
-}
+.mono { font-family: var(--mono); }
 
 .container {
   width: min(var(--maxw), 100% - 48px);
@@ -142,6 +184,7 @@ a {
 
 .section {
   position: relative;
+  z-index: 1;
   padding-block: clamp(72px, 10vw, 128px);
   scroll-margin-top: var(--nav-h);
 }
@@ -179,13 +222,13 @@ a {
 .head h2 {
   margin-top: 16px;
   font-size: clamp(30px, 4.4vw, 52px);
-  line-height: 1.05;
+  line-height: 1.04;
 }
 .head .lede {
   margin-top: 18px;
   color: var(--ink-dim);
   font-size: clamp(16px, 1.6vw, 19px);
-  line-height: 1.6;
+  line-height: 1.62;
 }
 
 /* ---- reveal (scroll) ---- */
@@ -195,10 +238,7 @@ a {
   transition: opacity 0.8s var(--bez-snap), transform 0.8s var(--bez-snap);
   will-change: opacity, transform;
 }
-[data-reveal].in {
-  opacity: 1;
-  transform: none;
-}
+[data-reveal].in { opacity: 1; transform: none; }
 [data-reveal][data-reveal-delay="1"] { transition-delay: 0.08s; }
 [data-reveal][data-reveal-delay="2"] { transition-delay: 0.16s; }
 [data-reveal][data-reveal-delay="3"] { transition-delay: 0.24s; }
@@ -217,11 +257,7 @@ a {
   color: var(--ink-dim);
   white-space: nowrap;
 }
-.chip .d {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
+.chip .d { width: 6px; height: 6px; border-radius: 50%; }
 
 kbd, .kbd {
   font-family: var(--mono);
@@ -234,7 +270,7 @@ kbd, .kbd {
   color: var(--ink);
 }
 
-/* ---- buttons ---- */
+/* ---- buttons (magnetic primitives tuned in landing.css) ---- */
 .btn {
   --btn-bg: var(--flow);
   --btn-fg: #04100c;
@@ -253,32 +289,51 @@ kbd, .kbd {
   background: var(--btn-bg);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: transform 0.2s var(--bez-fast), box-shadow 0.3s var(--bez-fast),
-    background 0.2s var(--bez-fast), border-color 0.2s var(--bez-fast);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 8px 28px -12px rgba(78, 230, 195, 0.5);
+  transition: transform 0.25s var(--bez-fast), box-shadow 0.3s var(--bez-fast),
+    background 0.25s var(--bez-fast), border-color 0.25s var(--bez-fast);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 10px 30px -12px var(--aura-flow),
+    0 1px 3px rgba(0, 0, 0, 0.5);
   user-select: none;
 }
 .btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 14px 34px -12px rgba(78, 230, 195, 0.65);
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 18px 44px -14px var(--aura-flow),
+    0 2px 5px rgba(0, 0, 0, 0.55);
 }
-.btn:active {
-  transform: translateY(0);
-}
+.btn:active { transform: translateY(0); }
 .btn-ghost {
-  --btn-bg: var(--bg-2);
+  --btn-bg: var(--glass);
   color: var(--ink);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
   border: 1px solid var(--line-strong);
+  box-shadow: var(--sh-1);
 }
 .btn-ghost:hover {
-  border-color: var(--line-strong);
   background: var(--surface);
+  box-shadow: var(--sh-2);
 }
 
-/* ---- reveal base for islands ---- */
+/* ---- glass panel primitive ---- */
+.panel {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--glass), rgba(10, 12, 19, 0.55));
+  box-shadow: var(--sh-1);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
   [data-reveal] { opacity: 1; transform: none; }
+  .field__blob, .field__grain { animation: none !important; }
 }
