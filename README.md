@@ -364,6 +364,26 @@ Then launch Spire, select a repository, and configure harnesses. Native harness
 credentials are entered directly in each CLI's own authentication flow — Spire
 never stores them.
 
+### Standalone coordinator
+
+The headless coordinator runs as a plain Node process and requires an explicit
+control token:
+
+```bash
+SPIRE_COORDINATOR_TOKEN="replace-with-a-secret" pnpm spire:coordinator
+```
+
+It listens on `127.0.0.1:43110` by default. Set `SPIRE_COORDINATOR_HOST` and
+`SPIRE_COORDINATOR_PORT` to choose another address; non-loopback hosts also
+require `SPIRE_ALLOW_REMOTE=1`. Its unauthenticated health endpoint is
+`GET /healthz`; authenticated control requests use `POST /v1/control` with
+`Authorization: Bearer <SPIRE_COORDINATOR_TOKEN>`, and resumable run events
+stream from `GET /v1/events` using the same header.
+
+This is a transitional deployment surface: SQLite state and harness adapters
+still run inside the coordinator process. A future worker deployment can replace
+the harness execution layer without changing the HTTP interface.
+
 ## Development commands
 
 ```bash
