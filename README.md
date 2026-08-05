@@ -374,11 +374,25 @@ SPIRE_COORDINATOR_TOKEN="replace-with-a-secret" pnpm spire:coordinator
 ```
 
 It listens on `127.0.0.1:43110` by default. Set `SPIRE_COORDINATOR_HOST` and
-`SPIRE_COORDINATOR_PORT` to choose another address; non-loopback hosts also
-require `SPIRE_ALLOW_REMOTE=1`. Its unauthenticated health endpoint is
-`GET /healthz`; authenticated control requests use `POST /v1/control` with
-`Authorization: Bearer <SPIRE_COORDINATOR_TOKEN>`, and resumable run events
-stream from `GET /v1/events` using the same header.
+`SPIRE_COORDINATOR_PORT` to choose another address. Loopback listeners use HTTP
+by default. A non-loopback host is refused unless `SPIRE_ALLOW_REMOTE=1` and a
+TLS identity is supplied through both `SPIRE_COORDINATOR_TLS_CERT` and
+`SPIRE_COORDINATOR_TLS_KEY`:
+
+```bash
+SPIRE_COORDINATOR_TOKEN="replace-with-a-secret" \
+SPIRE_COORDINATOR_HOST="0.0.0.0" \
+SPIRE_ALLOW_REMOTE=1 \
+SPIRE_COORDINATOR_TLS_CERT="/run/secrets/spire.crt" \
+SPIRE_COORDINATOR_TLS_KEY="/run/secrets/spire.key" \
+pnpm spire:coordinator
+```
+
+The certificate and private key must be a valid matching PEM pair. The startup
+URL uses `https://` whenever they are configured. The unauthenticated health
+endpoint is `GET /healthz`; authenticated control requests use
+`POST /v1/control` with `Authorization: Bearer <SPIRE_COORDINATOR_TOKEN>`, and
+resumable run events stream from `GET /v1/events` using the same header.
 
 This is a transitional deployment surface: SQLite state and harness adapters
 still run inside the coordinator process. A future worker deployment can replace

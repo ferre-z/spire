@@ -1,6 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
-  createServer,
   type IncomingMessage,
   type Server,
   type ServerResponse,
@@ -12,11 +11,13 @@ import {
   controlResponseSchema,
   type ControlRequest,
 } from "../shared/coordinator-protocol";
-import {
-  type CoordinatorEventStreamNotification,
-  CoordinatorEventStream,
-} from "./event-stream";
+import { CoordinatorEventStream } from "./event-stream";
 import { closeHttpServer, SseConnectionRegistry } from "./sse-connections";
+import {
+  createCoordinatorNodeServer,
+  type CoordinatorTlsOptions,
+} from "./server-transport";
+import { streamCoordinatorEvents } from "./sse-response";
 
 export const MAX_CONTROL_REQUEST_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -52,11 +53,13 @@ export type CoordinatorHttpServerOptions = Readonly<{
   token: string;
   host?: string;
   port?: number;
+  tls?: CoordinatorTlsOptions;
 }>;
 
 export type CoordinatorHttpServerAddress = Readonly<{
   host: string;
   port: number;
+  protocol: "http" | "https";
 }>;
 
 class RequestBodyTooLargeError extends Error {
@@ -76,19 +79,6 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
 
 function sendError(response: ServerResponse, status: number, error: string): void {
   sendJson(response, status, controlResponseSchema.parse({ ok: false, error }));
-}
-
-function sseFrame(notification: CoordinatorEventStreamNotification): string {
-  switch (notification.type) {
-    case "event":
-      return `id: ${notification.sequence}\nevent: run.event\ndata: ${JSON.stringify(notification.event)}\n\n`;
-    case "reset":
-      return 'event: reset\ndata: {"action":"fetch_snapshot"}\n\n';
-    default: {
-      const exhaustiveNotification: never = notification;
-      throw new Error(`Unexpected event stream notification: ${exhaustiveNotification}`);
-    }
-  }
 }
 
 async function readRequestBody(request: IncomingMessage): Promise<Buffer> {
@@ -125,11 +115,16 @@ export class CoordinatorHttpServer {
     if (this.server || this.closed) {
       throw new Error("Coordinator HTTP server cannot be started again.");
     }
-
-    const server = createServer({ requestTimeout: REQUEST_TIMEOUT_MS }, (request, response) => {
+    const handleRequest = (request: IncomingMessage, response: ServerResponse): void => {
       void this.handleRequest(request, response).catch(() => {
         sendError(response, 500, "Internal server error.");
       });
+    };
+    const { server, protocol } = createCoordinatorNodeServer({
+      host: this.host,
+      requestTimeout: REQUEST_TIMEOUT_MS,
+      tls: this.options.tls,
+      handleRequest,
     });
     this.server = server;
 
@@ -145,7 +140,11 @@ export class CoordinatorHttpServer {
       if (address === null || typeof address === "string") {
         throw new Error("Coordinator HTTP server did not bind a TCP address.");
       }
-      return { host: address.address, port: address.port };
+      return {
+        host: address.address,
+        port: address.port,
+        protocol,
+      };
     } catch (error: unknown) {
       this.server = undefined;
       server.close();
@@ -246,24 +245,11 @@ export class CoordinatorHttpServer {
   }
 
   private streamEvents(response: ServerResponse, afterSequence: number | undefined): void {
-    response.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "X-Accel-Buffering": "no",
-    });
-    response.flushHeaders();
-    const unregister = this.sseConnections.register(response);
-    const subscription = this.options.events.subscribe(afterSequence, (notification) => {
-      if (!response.writableEnded && !response.destroyed) response.write(sseFrame(notification));
-    });
-    const heartbeat = setInterval(() => {
-      if (!response.writableEnded && !response.destroyed) response.write(": heartbeat\n\n");
-    }, 15_000);
-    heartbeat.unref();
-    response.once("close", () => {
-      unregister();
-      clearInterval(heartbeat);
-      subscription.close();
-    });
+    streamCoordinatorEvents(
+      response,
+      this.options.events,
+      this.sseConnections,
+      afterSequence,
+    );
   }
 }

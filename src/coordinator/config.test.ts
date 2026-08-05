@@ -14,6 +14,7 @@ describe("readCoordinatorConfig", () => {
       host: "127.0.0.1",
       port: 43110,
       dataRoot: path.join("/srv/spire", ".spire-data"),
+      tls: undefined,
     });
   });
 
@@ -60,16 +61,43 @@ describe("readCoordinatorConfig", () => {
     ).toThrow(/SPIRE_ALLOW_REMOTE/);
   });
 
-  it("permits remote binding when explicitly enabled", () => {
-    const config = readCoordinatorConfig(
-      {
-        SPIRE_COORDINATOR_TOKEN: "test-token",
-        SPIRE_COORDINATOR_HOST: "0.0.0.0",
-        SPIRE_ALLOW_REMOTE: "1",
-      },
-      "/srv/spire",
-    );
+  it("rejects remote binding without a paired TLS certificate and key", () => {
+    expect(() =>
+      readCoordinatorConfig(
+        {
+          SPIRE_COORDINATOR_TOKEN: "test-token",
+          SPIRE_COORDINATOR_HOST: "0.0.0.0",
+          SPIRE_ALLOW_REMOTE: "1",
+        },
+        "/srv/spire",
+      ),
+    ).toThrow(/SPIRE_COORDINATOR_TLS_CERT/);
+  });
 
-    expect(config.host).toBe("0.0.0.0");
+  it("rejects an unpaired TLS certificate path", () => {
+    expect(() =>
+      readCoordinatorConfig(
+        {
+          SPIRE_COORDINATOR_TOKEN: "test-token",
+          SPIRE_COORDINATOR_TLS_CERT: "/run/secrets/coordinator.crt",
+        },
+        "/srv/spire",
+      ),
+    ).toThrow(/SPIRE_COORDINATOR_TLS_KEY/);
+  });
+
+  it("permits remote binding with explicit opt-in and paired TLS paths", () => {
+    const config = readCoordinatorConfig({
+      SPIRE_COORDINATOR_TOKEN: "test-token",
+      SPIRE_COORDINATOR_HOST: "0.0.0.0",
+      SPIRE_ALLOW_REMOTE: "1",
+      SPIRE_COORDINATOR_TLS_CERT: "/run/secrets/coordinator.crt",
+      SPIRE_COORDINATOR_TLS_KEY: "/run/secrets/coordinator.key",
+    }, "/srv/spire");
+
+    expect(config.tls).toEqual({
+      certificatePath: "/run/secrets/coordinator.crt",
+      privateKeyPath: "/run/secrets/coordinator.key",
+    });
   });
 });

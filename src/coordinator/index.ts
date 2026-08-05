@@ -1,7 +1,11 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { CoordinatorHttpServer } from "./http-server";
-import { readCoordinatorConfig } from "./config";
+import { CoordinatorTlsConfigurationError } from "./server-transport";
+import {
+  CoordinatorConfigurationError,
+  readCoordinatorConfig,
+} from "./config";
 import {
   createCoordinatorRuntime,
   type CoordinatorRuntime,
@@ -20,6 +24,10 @@ export type CoordinatorStartOptions = Readonly<{
   port?: number;
   registry?: CoordinatorRuntimeOptions["registry"];
   environment?: CoordinatorRuntimeOptions["environment"];
+  tls?: Readonly<{
+    certificate: Buffer;
+    privateKey: Buffer;
+  }>;
 }>;
 
 export type CoordinatorSession = Readonly<{
@@ -50,6 +58,7 @@ export async function startCoordinator(
     token: options.token,
     host: options.host,
     port: options.port,
+    tls: options.tls,
   });
 
   try {
@@ -63,7 +72,22 @@ export async function startCoordinator(
 
 async function runCoordinator(): Promise<void> {
   const config = readCoordinatorConfig(process.env, process.cwd());
-  const coordinator = await startCoordinator(config);
+  let tls: CoordinatorStartOptions["tls"];
+  if (config.tls) {
+    try {
+      const [certificate, privateKey] = await Promise.all([
+        readFile(config.tls.certificatePath),
+        readFile(config.tls.privateKeyPath),
+      ]);
+      tls = { certificate, privateKey };
+    } catch (error: unknown) {
+      throw new CoordinatorTlsConfigurationError(
+        "Unable to read the coordinator TLS certificate or private key.",
+        { cause: error },
+      );
+    }
+  }
+  const coordinator = await startCoordinator({ ...config, tls });
 
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = (): Promise<void> => {
@@ -81,14 +105,27 @@ async function runCoordinator(): Promise<void> {
     );
   };
 
-  process.stdout.write(`http://${coordinator.address.host}:${coordinator.address.port}\n`);
+  process.stdout.write(
+    `${coordinator.address.protocol}://${coordinator.address.host}:${coordinator.address.port}\n`,
+  );
 
   process.on("SIGINT", handleSignal);
   process.on("SIGTERM", handleSignal);
 }
 
+export function formatCoordinatorStartupError(error: unknown): string {
+  if (
+    error instanceof CoordinatorConfigurationError ||
+    error instanceof CoordinatorTlsConfigurationError
+  ) {
+    return `Coordinator failed to start: ${error.message}\n`;
+  }
+  return "Coordinator failed to start.\n";
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  void runCoordinator().catch(() => {
+  void runCoordinator().catch((error: unknown) => {
+    process.stderr.write(formatCoordinatorStartupError(error));
     process.exitCode = 1;
   });
 }
