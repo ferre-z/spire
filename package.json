@@ -10,6 +10,8 @@
     "make": "electron-forge make",
     "build:mcp": "vite build --config vite.mcp.config.ts",
     "spire:mcp": "pnpm build:mcp && node mcp-dist/mcp.js",
+    "build:coordinator": "vite build --config vite.coordinator.config.ts",
+    "spire:coordinator": "pnpm build:coordinator && node coordinator-dist/coordinator.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
