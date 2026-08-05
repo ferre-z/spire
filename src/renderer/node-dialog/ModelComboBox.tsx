@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type { HarnessId } from "../../shared/domain";
 import { useAppStore } from "../store";
@@ -11,17 +11,23 @@ export function ModelComboBox({ harnessId, modelId, onChange }: {
   const harnessModels = useAppStore((state) => state.harnessModels);
   const loadHarnessModels = useAppStore((state) => state.loadHarnessModels);
   const models = harnessModels[harnessId];
-  const currentName = models?.find((model) => model.id === modelId)?.name ?? "";
+  const currentModel = models?.find((model) => model.id === modelId);
+  const currentName = currentModel?.name ?? modelId;
+  const unavailable = modelId !== "" && models !== undefined && currentModel === undefined;
   const [query, setQuery] = useState(currentName);
+  const [binding, setBinding] = useState({ harnessId, modelId, currentName });
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
 
-  useEffect(() => {
+  if (
+    binding.harnessId !== harnessId ||
+    binding.modelId !== modelId ||
+    binding.currentName !== currentName
+  ) {
+    setBinding({ harnessId, modelId, currentName });
     setQuery(currentName);
     setHighlight(0);
-    // Reset the internal query whenever the bound model or harness changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelId, harnessId]);
+  }
 
   const filtered = useMemo(() => {
     if (!models) return [];
@@ -73,6 +79,7 @@ export function ModelComboBox({ harnessId, modelId, onChange }: {
   return (
     <div className="node-combobox">
       <input
+        aria-label="Model"
         className="node-combobox-input"
         data-model-search
         value={query}
@@ -85,6 +92,7 @@ export function ModelComboBox({ harnessId, modelId, onChange }: {
         }}
         onKeyDown={onKeyDown}
       />
+      {unavailable ? <small>Unavailable — {modelId}</small> : null}
       {open ? (
         <div className="node-combobox-list" data-model-options>
           {empty ? (

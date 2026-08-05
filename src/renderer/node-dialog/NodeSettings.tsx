@@ -1,6 +1,6 @@
-import type { GraphDefinitionV2, GraphNode, ModelOption, PlanMutation } from "../../shared/domain";
-import type { HarnessStatus } from "../../shared/control";
+import type { GraphDefinitionV2, GraphNode, PlanMutation } from "../../shared/domain";
 import { useAppStore } from "../store";
+import { BrainTab } from "./BrainTab";
 import { projectTopology } from "./selectors";
 
 const PLAN_MUTATIONS: readonly PlanMutation[] = ["retry", "skip", "reorder", "reroute", "pause", "replace", "insert", "remove", "edit"];
@@ -14,17 +14,16 @@ function AgentSettings({ node }: {
 }) {
   const updateNode = useAppStore((state) => state.updateNode);
   return <>
+    <BrainTab node={node} />
     <section data-section="job"><h3>JOB</h3><Field label="INSTRUCTIONS" hint="Instructions sent to this node's harness."><textarea value={node.job} onChange={(event) => updateNode(node.id, { job: event.target.value })} /></Field></section>
     <section data-section="access"><h3>ACCESS</h3><div className="node-dialog-field-grid"><Field label="MODE"><select value={node.access.mode} onChange={(event) => updateNode(node.id, { access: { ...node.access, mode: event.target.value === "workspace-write" ? "workspace-write" : "read-only" } })}><option value="read-only">Read-only</option><option value="workspace-write">Workspace write</option></select></Field><Field label="WRITE SCOPES" hint="One repo-relative glob per line."><textarea value={node.access.writeScopes.join("\n")} onChange={(event) => updateNode(node.id, { access: { ...node.access, writeScopes: event.target.value.split("\n").map((line) => line.trim()).filter(Boolean) } })} /></Field></div></section>
     <section data-section="authority"><h3>AUTHORITY</h3><Field label="SCOPE"><select value={node.authority.scope} onChange={(event) => { const scope = ["connected", "group", "graph"].includes(event.target.value) ? event.target.value : "self"; if (scope === "self" || scope === "connected" || scope === "group" || scope === "graph") updateNode(node.id, { authority: { ...node.authority, scope } }); }}><option value="self">Self</option><option value="connected">Connected</option><option value="group">Group</option><option value="graph">Graph</option></select></Field><div className="node-authority-actions">{PLAN_MUTATIONS.map((action) => { const selected = node.authority.actions.includes(action); return <button key={action} type="button" aria-pressed={selected} onClick={() => updateNode(node.id, { authority: { ...node.authority, actions: selected ? node.authority.actions.filter((item) => item !== action) : [...new Set([...node.authority.actions, action])] } })}>{action}</button>; })}</div></section>
   </>;
 }
 
-export function NodeSettings({ graph, node, harnesses, harnessModels }: {
+export function NodeSettings({ graph, node }: {
   readonly graph: GraphDefinitionV2;
   readonly node: GraphNode;
-  readonly harnesses: readonly HarnessStatus[];
-  readonly harnessModels: Readonly<Record<string, readonly ModelOption[]>>;
 }) {
   const updateNode = useAppStore((state) => state.updateNode);
   const routes = projectTopology(graph, node.id).outgoing;

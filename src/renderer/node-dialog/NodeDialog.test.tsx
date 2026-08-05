@@ -110,7 +110,7 @@ describe("NodeDialog", () => {
 
     expect(useAppStore.getState().loadHarnesses).toHaveBeenCalledTimes(1);
     expect(useAppStore.getState().loadHarnessModels).toHaveBeenCalledWith("opencode");
-    expect(document.querySelector<HTMLSelectElement>("select[aria-label='Model']")?.value).toBe("missing-model");
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Model']")?.value).toBe("missing-model");
     expect(document.body.textContent).toContain("Unavailable — missing-model");
   });
 

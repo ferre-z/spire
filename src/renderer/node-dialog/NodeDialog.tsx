@@ -18,8 +18,6 @@ export function NodeDialog() {
   const graph = useAppStore((state) => state.graph);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
   const selectNode = useAppStore((state) => state.selectNode);
-  const harnesses = useAppStore((state) => state.harnesses);
-  const harnessModels = useAppStore((state) => state.harnessModels);
   const loadHarnesses = useAppStore((state) => state.loadHarnesses);
   const loadHarnessModels = useAppStore((state) => state.loadHarnessModels);
   const nodeExecutions = useAppStore((state) => state.nodeExecutions);
@@ -162,7 +160,7 @@ export function NodeDialog() {
               </section>
               <section className="node-dialog-column node-dialog-settings" data-node-dialog-section="settings" data-active={activeSection === "settings"} aria-label="Node settings">
                 <div className="node-dialog-column-heading"><span>SETTINGS</span></div>
-                <NodeSettings graph={graph} node={node} harnesses={harnesses} harnessModels={harnessModels} />
+                <NodeSettings graph={graph} node={node} />
               </section>
               <section className="node-dialog-column node-dialog-output" data-node-dialog-section="output" data-active={activeSection === "output"} aria-label="Node output">
                 <div className="node-dialog-column-heading"><span>OUTPUT</span>{nodeExecutionsLoading ? <small>Loading…</small> : null}</div>

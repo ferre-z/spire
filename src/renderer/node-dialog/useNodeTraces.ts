@@ -42,20 +42,28 @@ export function useNodeTraces(
   runId: string | undefined,
   nodeId: string | undefined,
 ): { events: TraceEvent[]; loading: boolean; refresh: () => void } {
-  const [events, setEvents] = useState<TraceEvent[]>([]);
-  const [loading, setLoading] = useState(false);
+  const scope = runId !== undefined && nodeId !== undefined ? `${runId}\0${nodeId}` : undefined;
+  const [scopeState, setScopeState] = useState({ scope, generation: 0 });
+  const scopeChanged = scopeState.scope !== scope;
+  const generation = scopeChanged ? scopeState.generation + 1 : scopeState.generation;
+  if (scopeChanged) {
+    setScopeState({ scope, generation });
+  }
+  const stateKey = scope === undefined ? undefined : `${generation}\0${scope}`;
+  const [traceState, setTraceState] = useState<{
+    readonly key: string | undefined;
+    readonly events: TraceEvent[];
+    readonly loading: boolean;
+  }>(() => ({ key: stateKey, events: [], loading: stateKey !== undefined }));
+  const currentState = traceState.key === stateKey
+    ? traceState
+    : { key: stateKey, events: [], loading: stateKey !== undefined };
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    // No scoped node → clear and idle: no fetch, no subscription.
-    if (runId === undefined || nodeId === undefined) {
-      setEvents([]);
-      setLoading(false);
-      return;
-    }
+    if (runId === undefined || nodeId === undefined || stateKey === undefined) return;
 
     let cancelled = false;
-    setLoading(true);
 
     const fetchPage = async (
       cursor: TraceCursor | undefined,
@@ -83,10 +91,11 @@ export function useNodeTraces(
     // from producing duplicates.
     const unsubscribe = window.spire.onTraceEvent((event) => {
       if (event.runId !== runId || event.nodeId !== nodeId) return;
-      setEvents((current) => {
-        const next = dedupeAscending([...current, event]);
+      setTraceState((current) => {
+        const currentEvents = current.key === stateKey ? current.events : [];
+        const next = dedupeAscending([...currentEvents, event]);
         next.sort((a, b) => a.sequence - b.sequence);
-        return capEvents(next);
+        return { key: stateKey, events: capEvents(next), loading: true };
       });
     });
 
@@ -95,26 +104,39 @@ export function useNodeTraces(
         if (cancelled) return;
         // Merge into current state so live events that arrived while the query
         // was in flight are preserved rather than dropped by a replace.
-        setEvents((current) => {
-          const merged = [...current, ...fetched];
+        setTraceState((current) => {
+          const currentEvents = current.key === stateKey ? current.events : [];
+          const merged = [...currentEvents, ...fetched];
           merged.sort((a, b) => a.sequence - b.sequence);
-          return capEvents(dedupeAscending(merged));
+          return { key: stateKey, events: capEvents(dedupeAscending(merged)), loading: false };
         });
-        setLoading(false);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
         console.error("useNodeTraces: failed to load node traces", error);
-        setLoading(false);
+        setTraceState((current) => ({
+          key: stateKey,
+          events: current.key === stateKey ? current.events : [],
+          loading: false,
+        }));
       });
 
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [runId, nodeId, reload]);
+  }, [runId, nodeId, reload, stateKey]);
 
-  const refresh = useCallback(() => setReload((count) => count + 1), []);
+  const refresh = useCallback(() => {
+    if (stateKey !== undefined) {
+      setTraceState((current) => ({
+        key: stateKey,
+        events: current.key === stateKey ? current.events : [],
+        loading: true,
+      }));
+    }
+    setReload((count) => count + 1);
+  }, [stateKey]);
 
-  return { events, loading, refresh };
+  return { events: currentState.events, loading: currentState.loading, refresh };
 }
