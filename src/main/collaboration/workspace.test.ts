@@ -65,6 +65,11 @@ function packetNode(id: string, overrides: Partial<AgentNode> = {}): AgentNode {
     authority: { scope: "self", actions: [] },
     activation: "all",
     maxVisits: 3,
+    thinkingEffort: "medium",
+    skills: [],
+    goal: "",
+    subGoals: [],
+    integrations: [],
     position: { x: 0, y: 0 },
     ...overrides,
   };
@@ -263,6 +268,52 @@ describe("CollaborationWorkspace", () => {
     // Relevant outputs: predecessor summaries + artifact links.
     expect(packet).toContain("Plan ready.");
     expect(packet).toContain("[plan](docs/plan.md)");
+  });
+
+  it("composes goal, sub-goals, skills and thinking effort into the context packet", async () => {
+    const { workspace } = await setup();
+    const packet = await workspace.buildContextPacket({
+      node: packetNode("implementer", {
+        goal: "Implement the schema",
+        subGoals: ["  Add the migration  ", "Wire the repository"],
+        skills: ["TypeScript", "SQLite"],
+        thinkingEffort: "high",
+      }),
+      directory: "/tmp/worktrees/run-1",
+      predecessors: [],
+    });
+
+    // Goal: node.goal wins over the run objective.
+    expect(packet).toContain("## Goal\n\nImplement the schema");
+    // Sub-goals: bullets present, each trimmed, in order.
+    expect(packet).toContain("## Sub-goals\n\n- Add the migration\n- Wire the repository");
+    expect(packet).not.toContain("  Add the migration  ");
+    // Skills: bullets present.
+    expect(packet).toContain("## Skills\n\n- TypeScript\n- SQLite");
+    // Thinking effort: the node's value.
+    expect(packet).toContain("## Thinking effort\n\nhigh");
+  });
+
+  it("falls back to the run objective and omits empty sub-goals/skills sections", async () => {
+    const { workspace } = await setup();
+    const packet = await workspace.buildContextPacket({
+      node: packetNode("implementer", {
+        goal: "",
+        subGoals: [],
+        skills: [],
+        thinkingEffort: "low",
+      }),
+      directory: "/tmp/worktrees/run-1",
+      predecessors: [],
+    });
+
+    // Goal: empty node.goal falls back to the run objective.
+    expect(packet).toContain("## Goal\n\nShip the schema migration");
+    // Empty sub-goals/skills → no section at all.
+    expect(packet).not.toContain("## Sub-goals");
+    expect(packet).not.toContain("## Skills");
+    // Thinking effort is always present.
+    expect(packet).toContain("## Thinking effort\n\nlow");
   });
 
   it("survives an app restart: a fresh instance sees prior inbox and continues numbering", async () => {

@@ -83,6 +83,15 @@ export const nodeAuthoritySchema = z.strictObject({
 });
 export type NodeAuthority = z.infer<typeof nodeAuthoritySchema>;
 
+export const nodeIntegrationSchema = z.object({
+  type: z.enum(['mcp', 'tool', 'api', 'webhook']),
+  name: z.string().min(1),
+  description: z.string().default(''),
+  enabled: z.boolean().default(true),
+});
+export type NodeIntegration = z.infer<typeof nodeIntegrationSchema>;
+export type ThinkingEffort = 'low' | 'medium' | 'high';
+
 const nodeAccessSchema = z.strictObject({
   mode: z.enum(["read-only", "workspace-write"]).default("read-only"),
   writeScopes: z.array(z.string()).default([]),
@@ -104,6 +113,11 @@ const agentLikeShape = {
   authority: nodeAuthoritySchema.default({ scope: "self", actions: [] }),
   activation: z.enum(["all", "any"]).default("all"),
   maxVisits: z.number().int().positive().default(3),
+  thinkingEffort: z.enum(['low', 'medium', 'high']).default('medium'),
+  skills: z.array(z.string()).default([]),
+  goal: z.string().default(''),
+  subGoals: z.array(z.string()).default([]),
+  integrations: z.array(nodeIntegrationSchema).default([]),
   groupId: z.string().min(1).optional(),
   position: nodePositionSchema,
 };
