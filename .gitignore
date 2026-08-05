@@ -1,6 +1,7 @@
 node_modules/
 .vite/
 mcp-dist/
+coordinator-dist/
 out/
 coverage/
 test-results/
