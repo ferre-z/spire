@@ -100,6 +100,11 @@ function createNodeTemplate(
         authority: { scope: "self", actions: [] },
         activation: "all",
         maxVisits: kind === "agent" ? 3 : 1,
+        thinkingEffort: "medium",
+        skills: [],
+        goal: "",
+        subGoals: [],
+        integrations: [],
         position,
       };
     }

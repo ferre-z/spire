@@ -20,6 +20,11 @@ const agent: GraphNode = {
   authority: { scope: "self", actions: ["retry"] },
   activation: "any",
   maxVisits: 3,
+  thinkingEffort: "medium",
+  skills: [],
+  goal: "",
+  subGoals: [],
+  integrations: [],
   position: { x: 0, y: 0 },
 };
 

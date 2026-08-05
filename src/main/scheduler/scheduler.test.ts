@@ -63,6 +63,11 @@ function agent(id: string, overrides: Partial<AgentNode> = {}): AgentNode {
     authority: { scope: "self", actions: [] },
     activation: "all",
     maxVisits: 3,
+    thinkingEffort: "medium",
+    skills: [],
+    goal: "",
+    subGoals: [],
+    integrations: [],
     position: { x: 0, y: 0 },
     ...overrides,
   };
