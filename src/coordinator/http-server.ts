@@ -16,6 +16,7 @@ import {
   type CoordinatorEventStreamNotification,
   CoordinatorEventStream,
 } from "./event-stream";
+import { closeHttpServer, SseConnectionRegistry } from "./sse-connections";
 
 export const MAX_CONTROL_REQUEST_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -109,7 +110,9 @@ export class CoordinatorHttpServer {
   private readonly host: string;
   private readonly port: number;
   private readonly tokenDigest: Buffer;
+  private readonly sseConnections = new SseConnectionRegistry();
   private server: Server | undefined;
+  private closePromise: Promise<void> | undefined;
   private closed = false;
 
   constructor(private readonly options: CoordinatorHttpServerOptions) {
@@ -154,16 +157,8 @@ export class CoordinatorHttpServer {
     const server = this.server;
     this.server = undefined;
     this.closed = true;
-    if (!server?.listening) return;
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error === undefined) {
-          resolve();
-          return;
-        }
-        reject(error);
-      });
-    });
+    this.closePromise ??= closeHttpServer(server, this.sseConnections);
+    return this.closePromise;
   }
 
   private async handleRequest(
@@ -257,6 +252,7 @@ export class CoordinatorHttpServer {
       "X-Accel-Buffering": "no",
     });
     response.flushHeaders();
+    const unregister = this.sseConnections.register(response);
     const subscription = this.options.events.subscribe(afterSequence, (notification) => {
       if (!response.writableEnded && !response.destroyed) response.write(sseFrame(notification));
     });
@@ -265,6 +261,7 @@ export class CoordinatorHttpServer {
     }, 15_000);
     heartbeat.unref();
     response.once("close", () => {
+      unregister();
       clearInterval(heartbeat);
       subscription.close();
     });

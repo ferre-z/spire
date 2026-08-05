@@ -168,6 +168,30 @@ describe("CoordinatorHttpServer", () => {
     await expect(testServer.server.close()).resolves.toBeUndefined();
   });
 
+  it("closes promptly while an authenticated SSE client remains connected", async () => {
+    const testServer = await startTestServer();
+    const response = await fetch(`${testServer.baseUrl}/v1/events`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("SSE response body is unavailable.");
+    const closePromise = testServer.server.close();
+
+    try {
+      await expect(
+        Promise.race([
+          closePromise.then(() => true),
+          new Promise<false>((resolve) => {
+            setTimeout(() => resolve(false), 100);
+          }),
+        ]),
+      ).resolves.toBe(true);
+    } finally {
+      await reader.cancel();
+      await closePromise;
+    }
+  });
+
   it("streams authenticated run events as SSE frames over a real HTTP socket", async () => {
     const events = new CoordinatorEventStream();
     const server = new CoordinatorHttpServer({
