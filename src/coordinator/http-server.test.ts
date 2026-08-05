@@ -71,6 +71,68 @@ describe("CoordinatorHttpServer", () => {
     ).toEqual({ ok: true, output: { ready: true } });
   });
 
+  it("returns the health payload over a real HTTP socket", async () => {
+    const testServer = await startTestServer();
+    servers.push(testServer.server);
+
+    const response = await fetch(`${testServer.baseUrl}/healthz`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok", protocolVersion: 1 });
+  });
+
+  it("rejects an invalid bearer token over a real HTTP socket", async () => {
+    const testServer = await startTestServer();
+    servers.push(testServer.server);
+
+    const response = await fetch(`${testServer.baseUrl}/v1/control`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer invalid-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ operation: "state.get", input: {} }),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects invalid JSON over a real HTTP socket", async () => {
+    const testServer = await startTestServer();
+    servers.push(testServer.server);
+
+    const response = await fetch(`${testServer.baseUrl}/v1/control`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      body: "not-json",
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 404 for an unsupported route over a real HTTP socket", async () => {
+    const testServer = await startTestServer();
+    servers.push(testServer.server);
+
+    expect((await fetch(`${testServer.baseUrl}/not-found`)).status).toBe(404);
+  });
+
+  it("does not expose control handler errors over a real HTTP socket", async () => {
+    const testServer = await startTestServer();
+    servers.push(testServer.server);
+
+    const response = await authorizedFetch(testServer.baseUrl, {
+      operation: "diagnostics.get",
+      input: {},
+    });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "Internal server error.",
+    });
+  });
+
   it("rejects a request body larger than one MiB", async () => {
     const testServer = await startTestServer();
     servers.push(testServer.server);

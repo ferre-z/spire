@@ -17,12 +17,6 @@ export const MAX_CONTROL_REQUEST_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_HOST = "127.0.0.1";
 
-const requestMetadataSchema = z.strictObject({
-  method: z.string().optional(),
-  url: z.string().optional(),
-  authorization: z.unknown(),
-});
-
 const bearerTokenSchema = z
   .string()
   .regex(/^Bearer [^\s]+$/)
@@ -151,32 +145,21 @@ export class CoordinatorHttpServer {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
-    let metadata: z.infer<typeof requestMetadataSchema>;
-    try {
-      metadata = requestMetadataSchema.parse({
-        method: request.method,
-        url: request.url,
-        authorization: request.headers.authorization,
-      });
-    } catch {
-      sendError(response, 400, "Invalid request.");
-      return;
-    }
-    if (metadata.method === "GET" && metadata.url === "/healthz") {
+    if (request.method === "GET" && request.url === "/healthz") {
       sendJson(response, 200, healthResponseSchema.parse({
         status: "ok",
         protocolVersion: COORDINATOR_PROTOCOL_VERSION,
       }));
       return;
     }
-    if (metadata.method !== "POST" || metadata.url !== "/v1/control") {
+    if (request.method !== "POST" || request.url !== "/v1/control") {
       sendError(response, 404, "Not found.");
       return;
     }
 
     let token: string;
     try {
-      token = bearerTokenSchema.parse(metadata.authorization);
+      token = bearerTokenSchema.parse(request.headers.authorization);
     } catch {
       sendError(response, 401, "Unauthorized.");
       return;
