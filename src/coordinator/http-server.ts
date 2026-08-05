@@ -12,6 +12,10 @@ import {
   controlResponseSchema,
   type ControlRequest,
 } from "../shared/coordinator-protocol";
+import {
+  type CoordinatorEventStreamNotification,
+  CoordinatorEventStream,
+} from "./event-stream";
 
 export const MAX_CONTROL_REQUEST_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -21,6 +25,13 @@ const bearerTokenSchema = z
   .string()
   .regex(/^Bearer [^\s]+$/)
   .transform((value) => value.slice("Bearer ".length));
+
+const lastEventIdSchema = z
+  .string()
+  .regex(/^(0|[1-9]\d*)$/)
+  .transform(Number)
+  .refine(Number.isSafeInteger)
+  .optional();
 
 const healthResponseSchema = z.strictObject({
   status: z.literal("ok"),
@@ -36,6 +47,7 @@ export type CoordinatorControl = Readonly<{
 
 export type CoordinatorHttpServerOptions = Readonly<{
   control: CoordinatorControl;
+  events: CoordinatorEventStream;
   token: string;
   host?: string;
   port?: number;
@@ -63,6 +75,19 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
 
 function sendError(response: ServerResponse, status: number, error: string): void {
   sendJson(response, status, controlResponseSchema.parse({ ok: false, error }));
+}
+
+function sseFrame(notification: CoordinatorEventStreamNotification): string {
+  switch (notification.type) {
+    case "event":
+      return `id: ${notification.sequence}\nevent: run.event\ndata: ${JSON.stringify(notification.event)}\n\n`;
+    case "reset":
+      return 'event: reset\ndata: {"action":"fetch_snapshot"}\n\n';
+    default: {
+      const exhaustiveNotification: never = notification;
+      throw new Error(`Unexpected event stream notification: ${exhaustiveNotification}`);
+    }
+  }
 }
 
 async function readRequestBody(request: IncomingMessage): Promise<Buffer> {
@@ -152,22 +177,25 @@ export class CoordinatorHttpServer {
       }));
       return;
     }
+    if (request.method === "GET" && request.url === "/v1/events") {
+      const token = this.readBearerToken(request, response);
+      if (token === undefined) return;
+      let afterSequence: number | undefined;
+      try {
+        afterSequence = lastEventIdSchema.parse(request.headers["last-event-id"]);
+      } catch {
+        sendError(response, 400, "Invalid Last-Event-ID.");
+        return;
+      }
+      this.streamEvents(response, afterSequence);
+      return;
+    }
     if (request.method !== "POST" || request.url !== "/v1/control") {
       sendError(response, 404, "Not found.");
       return;
     }
 
-    let token: string;
-    try {
-      token = bearerTokenSchema.parse(request.headers.authorization);
-    } catch {
-      sendError(response, 401, "Unauthorized.");
-      return;
-    }
-    if (!this.isAuthenticated(token)) {
-      sendError(response, 401, "Unauthorized.");
-      return;
-    }
+    if (this.readBearerToken(request, response) === undefined) return;
 
     let rawRequest: unknown;
     try {
@@ -202,5 +230,43 @@ export class CoordinatorHttpServer {
 
   private isAuthenticated(token: string): boolean {
     return timingSafeEqual(digestToken(token), this.tokenDigest);
+  }
+
+  private readBearerToken(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): string | undefined {
+    let token: string;
+    try {
+      token = bearerTokenSchema.parse(request.headers.authorization);
+    } catch {
+      sendError(response, 401, "Unauthorized.");
+      return undefined;
+    }
+    if (!this.isAuthenticated(token)) {
+      sendError(response, 401, "Unauthorized.");
+      return undefined;
+    }
+    return token;
+  }
+
+  private streamEvents(response: ServerResponse, afterSequence: number | undefined): void {
+    response.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    });
+    response.flushHeaders();
+    const subscription = this.options.events.subscribe(afterSequence, (notification) => {
+      if (!response.writableEnded && !response.destroyed) response.write(sseFrame(notification));
+    });
+    const heartbeat = setInterval(() => {
+      if (!response.writableEnded && !response.destroyed) response.write(": heartbeat\n\n");
+    }, 15_000);
+    heartbeat.unref();
+    response.once("close", () => {
+      clearInterval(heartbeat);
+      subscription.close();
+    });
   }
 }

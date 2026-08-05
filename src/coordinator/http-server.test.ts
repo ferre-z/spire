@@ -3,6 +3,8 @@ import {
   CoordinatorHttpServer,
   type CoordinatorControl,
 } from "./http-server";
+import { CoordinatorEventStream } from "./event-stream";
+import type { RunEvent } from "../shared/domain";
 
 const TOKEN = "test-control-token";
 
@@ -23,12 +25,25 @@ type TestServer = {
 async function startTestServer(): Promise<TestServer> {
   const server = new CoordinatorHttpServer({
     control: new StubControl(),
+    events: new CoordinatorEventStream(),
     token: TOKEN,
     host: "127.0.0.1",
     port: 0,
   });
   const { host, port } = await server.start();
   return { server, baseUrl: `http://${host}:${port}` };
+}
+
+function runEvent(message: string): RunEvent {
+  return {
+    id: `event-${message}`,
+    runId: "run-1",
+    sequence: 0,
+    timestamp: "2026-08-05T10:00:00.000Z",
+    kind: "status",
+    phase: "preparing",
+    message,
+  };
 }
 
 function authorizedFetch(baseUrl: string, body: unknown): Promise<Response> {
@@ -151,5 +166,71 @@ describe("CoordinatorHttpServer", () => {
 
     await testServer.server.close();
     await expect(testServer.server.close()).resolves.toBeUndefined();
+  });
+
+  it("streams authenticated run events as SSE frames over a real HTTP socket", async () => {
+    const events = new CoordinatorEventStream();
+    const server = new CoordinatorHttpServer({
+      control: new StubControl(),
+      events,
+      token: TOKEN,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    const { host, port } = await server.start();
+    servers.push(server);
+
+    const response = await fetch(`http://${host}:${port}/v1/events`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("SSE response body is unavailable.");
+    events.publish(runEvent("first"));
+    const frame = await reader.read();
+
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect(response.headers.get("cache-control")).toBe("no-cache");
+    expect(response.headers.get("x-accel-buffering")).toBe("no");
+    expect(new TextDecoder().decode(frame.value)).toContain(
+      'id: 1\nevent: run.event\ndata: {"id":"event-first","runId":"run-1","sequence":0,"timestamp":"2026-08-05T10:00:00.000Z","kind":"status","phase":"preparing","message":"first"}\n\n',
+    );
+
+    await reader.cancel();
+  });
+
+  it("replays events after Last-Event-ID over a real HTTP socket", async () => {
+    const events = new CoordinatorEventStream();
+    events.publish(runEvent("first"));
+    events.publish(runEvent("second"));
+    events.publish(runEvent("third"));
+    const server = new CoordinatorHttpServer({
+      control: new StubControl(),
+      events,
+      token: TOKEN,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    const { host, port } = await server.start();
+    servers.push(server);
+
+    const response = await fetch(`http://${host}:${port}/v1/events`, {
+      headers: { Authorization: `Bearer ${TOKEN}`, "Last-Event-ID": "1" },
+    });
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("SSE response body is unavailable.");
+    try {
+      const nextFrame = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("Expected replay frames.")), 100);
+        }),
+      ]);
+      const frames = new TextDecoder().decode(nextFrame.value);
+
+      expect(frames).toContain('id: 2\nevent: run.event\ndata: {"id":"event-second"');
+      expect(frames).toContain('id: 3\nevent: run.event\ndata: {"id":"event-third"');
+    } finally {
+      await reader.cancel();
+    }
   });
 });

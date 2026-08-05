@@ -10,17 +10,19 @@ import { OpenCodeHarness } from "../main/harness/opencode";
 import { createDefaultHarnessRegistry } from "../main/harness/registry";
 import { RunEngine } from "../main/run-engine";
 import { LocalWorktreeBackend } from "../main/worktree";
+import { CoordinatorEventStream } from "./event-stream";
 
 export type CoordinatorRuntimeOptions = {
-  dataRoot: string;
-  registry?: HarnessRegistry;
-  environment?: SpireControlEnvironment;
-  notify?: (event: RunEvent) => void;
+  readonly dataRoot: string;
+  readonly registry?: HarnessRegistry;
+  readonly environment?: SpireControlEnvironment;
+  readonly notify?: (event: RunEvent) => void;
 };
 
 export type CoordinatorRuntime = {
-  control: SpireControl;
-  close(): Promise<void>;
+  readonly control: SpireControl;
+  readonly events: CoordinatorEventStream;
+  readonly close: () => Promise<void>;
 };
 
 export async function createCoordinatorRuntime(
@@ -31,11 +33,15 @@ export async function createCoordinatorRuntime(
   const harness = new OpenCodeHarness();
   const backend = new LocalWorktreeBackend(path.join(options.dataRoot, "worktrees"));
   const journal = database.createTraceJournal();
+  const events = new CoordinatorEventStream();
   const engine = new RunEngine(
     database,
     registry,
     backend,
-    options.notify ?? (() => {}),
+    (event) => {
+      events.publish(event);
+      options.notify?.(event);
+    },
     journal,
     options.dataRoot,
   );
@@ -52,6 +58,7 @@ export async function createCoordinatorRuntime(
 
   return {
     control,
+    events,
     close(): Promise<void> {
       closePromise ??= closeRuntime({ database, harness, registry });
       return closePromise;
