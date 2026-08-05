@@ -55,8 +55,8 @@ export async function startCoordinator(): Promise<void> {
     throw error;
   }
 
-  process.once("SIGINT", handleSignal);
-  process.once("SIGTERM", handleSignal);
+  process.on("SIGINT", handleSignal);
+  process.on("SIGTERM", handleSignal);
 }
 
 void startCoordinator().catch(() => {
